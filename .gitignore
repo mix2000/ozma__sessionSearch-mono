@@ -5,3 +5,6 @@
 # Web build artefacts
 /web/node_modules/
 /web/dist/
+
+# Local release builds
+/dist/

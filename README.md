@@ -98,5 +98,16 @@ cd web && npm run dev                         # интерфейс с прокс
   открытые процессы, запуск терминала.
 - `crates/app` — сервер axum, встроенный интерфейс, командная строка.
 - `web/` — React + antd.
-- Сборки под macOS и Windows — `.github/workflows/build.yml`; тег `v*`
-  публикует релиз.
+- CI (`.github/workflows/check.yml`) — только проверки на macOS и Windows.
+
+## Релиз
+
+Собирается локально на Mac — macOS arm64, x64 и Windows x64:
+
+```bash
+scripts/release.sh             # собрать в dist/
+scripts/release.sh --publish   # + тег v<версия из Cargo.toml> и загрузка в GitHub Release
+```
+
+Нужны: `rustup target add aarch64-apple-darwin x86_64-apple-darwin
+x86_64-pc-windows-msvc`, `cargo install cargo-xwin`, `brew install llvm lld`, `gh`.
