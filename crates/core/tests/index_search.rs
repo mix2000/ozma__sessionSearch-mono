@@ -99,29 +99,56 @@ fn search(e: &Engine, q: &str, headless: bool) -> serde_json::Value {
     serde_json::to_value(r).unwrap()
 }
 
-#[test]
-fn index_search_context_incremental_resume() {
+/// Fixture indexed once.
+fn synced() -> (Fixture, Engine) {
     let f = setup();
     let e = engine(&f);
+    e.sync();
+    (f, e)
+}
 
+fn count(e: &Engine, q: &str, headless: bool) -> usize {
+    search(e, q, headless)["results"].as_array().unwrap().len()
+}
+
+fn append(f: &Fixture, text: &str) {
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&f.claude_file)
+        .unwrap();
+    write!(file, "{text}").unwrap();
+}
+
+#[test]
+fn first_sync_indexes_main_transcripts_only() {
+    let f = setup();
+    let e = engine(&f);
     let r = e.sync();
     assert_eq!(r.files, 3, "subagent transcripts are not discovered");
     assert_eq!(r.updated, 3);
     // claude: user + 2 answers; headless: 2; codex: user + answer
     assert_eq!(r.messages, 7);
+    // Second pass: nothing changed.
+    assert_eq!(e.sync().updated, 0);
+}
 
+#[test]
+fn status_counts_sessions_per_provider() {
+    let (_f, e) = synced();
     let st = serde_json::to_value(e.status().unwrap()).unwrap();
     assert_eq!(st["sessions"], 3);
     assert_eq!(st["messages"], 7);
+    assert_eq!(st["minQueryLength"], 2);
     assert_eq!(st["index"]["running"], false);
     assert!(st["index"]["lastRunAt"].is_string());
     assert_eq!(st["providers"][0]["provider"], "claude");
     assert_eq!(st["providers"][0]["sessions"], 2);
     assert_eq!(st["providers"][2]["exists"], false);
+}
 
-    // Second pass: nothing changed.
-    assert_eq!(e.sync().updated, 0);
-
+#[test]
+fn search_returns_fresh_sessions_with_card_fields() {
+    let (_f, e) = synced();
     // Interactive only by default; Codex message is older → after Claude.
     let v = search(&e, "nginx", false);
     assert_eq!(v["terms"], serde_json::json!(["nginx"]));
@@ -138,6 +165,15 @@ fn index_search_context_incremental_resume() {
     assert_eq!(claude["lastAt"], "2026-11-10T08:56:00.000Z");
     assert_eq!(claude["messageCount"], 3);
     assert_eq!(claude["workdirExists"], true);
+    assert!(claude.get("live").is_none());
+    assert_eq!(results[1]["title"], "проверь сборку и nginx");
+    assert_eq!(results[1]["gitBranch"], "dev");
+}
+
+#[test]
+fn hits_carry_a_paragraph_snippet() {
+    let (_f, e) = synced();
+    let claude = &search(&e, "nginx", false)["results"][0];
     assert_eq!(
         claude["matches"], 2,
         "tool output, thinking, sidechain, compact summary skipped"
@@ -152,58 +188,27 @@ fn index_search_context_incremental_resume() {
         "Нашёл ошибку в nginx config: ECONNREFUSED на upstream."
     );
     assert_eq!(hit["snippet"]["after"], "Исправляю.");
-    assert!(claude.get("live").is_none());
-    assert_eq!(results[1]["title"], "проверь сборку и nginx");
-    assert_eq!(results[1]["gitBranch"], "dev");
+}
 
+#[test]
+fn all_terms_must_occur_in_one_indexed_message() {
+    let (_f, e) = synced();
     // Cyrillic case-insensitive, substring, all terms in one message.
     let v = search(&e, "деплой ПОЧИНИ", false);
     assert_eq!(v["results"].as_array().unwrap().len(), 1);
     assert_eq!(v["results"][0]["hits"][0]["seq"], 0);
-    assert_eq!(
-        search(&e, "refused", false)["results"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        search(&e, "\"nginx config\"", false)["results"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        search(&e, "secret", true)["results"]
-            .as_array()
-            .unwrap()
-            .len(),
-        0
-    );
-    assert_eq!(
-        search(&e, "reasoning", true)["results"]
-            .as_array()
-            .unwrap()
-            .len(),
-        0
-    );
-    assert_eq!(
-        search(&e, "починка готово", false)["results"]
-            .as_array()
-            .unwrap()
-            .len(),
-        0
-    );
+    assert_eq!(count(&e, "refused", false), 1);
+    assert_eq!(count(&e, "\"nginx config\"", false), 1);
+    assert_eq!(count(&e, "починка готово", false), 0);
+    // Tool output and thinking are never indexed.
+    assert_eq!(count(&e, "secret", true), 0);
+    assert_eq!(count(&e, "reasoning", true), 0);
+}
 
-    // Headless included on demand; provider filter.
-    assert_eq!(
-        search(&e, "nginx", true)["results"]
-            .as_array()
-            .unwrap()
-            .len(),
-        3
-    );
+#[test]
+fn headless_on_demand_provider_filter_and_short_query() {
+    let (_f, e) = synced();
+    assert_eq!(count(&e, "nginx", true), 3);
     let only_codex = e
         .search(&SearchParams {
             q: "nginx".into(),
@@ -213,17 +218,21 @@ fn index_search_context_incremental_resume() {
         .unwrap();
     assert_eq!(only_codex.results.len(), 1);
     assert_eq!(only_codex.results[0].id, CODEX_ID);
-
-    // Too short query.
     let err = e
         .search(&SearchParams {
             q: "a".into(),
             ..Default::default()
         })
         .unwrap_err();
-    assert_eq!(err.status, 400);
+    assert_eq!(
+        (err.status(), err.message()),
+        (400, "Введите хотя бы 2 символа")
+    );
+}
 
-    // Context: 3 messages before/after.
+#[test]
+fn context_shows_messages_around_a_hit() {
+    let (_f, e) = synced();
     let ctx = serde_json::to_value(e.context(CLAUDE_ID, 1).unwrap()).unwrap();
     let seqs: Vec<i64> = ctx
         .as_array()
@@ -235,20 +244,16 @@ fn index_search_context_incremental_resume() {
     assert_eq!(ctx[0]["role"], "user");
     assert_eq!(ctx[0]["text"], "Почини ДЕПЛОЙ nginx");
     assert_eq!(ctx[0]["at"], "2026-11-10T08:55:37.856Z");
+}
 
-    // Incremental: append a message (plus an unfinished line).
-    {
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&f.claude_file)
-            .unwrap();
-        writeln!(
-            file,
-            r#"{{"type":"user","entrypoint":"cli","timestamp":"2026-11-12T10:00:00.000Z","message":{{"content":"ещё вопрос про kubernetes"}}}}"#
-        )
-        .unwrap();
-        write!(file, r#"{{"type":"assistant","message":{{"content":"half"#).unwrap();
-    }
+#[test]
+fn appended_lines_are_indexed_incrementally() {
+    let (f, e) = synced();
+    append(
+        &f,
+        "{\"type\":\"user\",\"entrypoint\":\"cli\",\"timestamp\":\"2026-11-12T10:00:00.000Z\",\"message\":{\"content\":\"ещё вопрос про kubernetes\"}}\n",
+    );
+    append(&f, r#"{"type":"assistant","message":{"content":"half"#);
     let r = e.sync();
     assert_eq!((r.updated, r.messages), (1, 1));
     let v = search(&e, "kubernetes", false);
@@ -256,21 +261,18 @@ fn index_search_context_incremental_resume() {
     assert_eq!(v["results"][0]["hits"][0]["seq"], 3);
     assert_eq!(v["results"][0]["lastAt"], "2026-11-12T10:00:00.000Z");
     assert_eq!(v["results"][0]["title"], "Починка деплоя");
-    {
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&f.claude_file)
-            .unwrap();
-        writeln!(file, r#" kubernetes done"}}}}"#).unwrap();
-    }
+    append(&f, " kubernetes done\"}}\n");
     let r = e.sync();
     assert_eq!(
         (r.updated, r.messages),
         (1, 1),
         "the unfinished line is read once complete"
     );
+}
 
-    // A file that got shorter is reindexed from scratch.
+#[test]
+fn a_shorter_file_is_reindexed_from_scratch() {
+    let (f, e) = synced();
     std::fs::write(
         &f.claude_file,
         fixture_text("claude-headless.jsonl", &f.workdir),
@@ -278,16 +280,13 @@ fn index_search_context_incremental_resume() {
     .unwrap();
     let r = e.sync();
     assert_eq!((r.updated, r.messages), (1, 2));
-    assert_eq!(
-        search(&e, "kubernetes", true)["results"]
-            .as_array()
-            .unwrap()
-            .len(),
-        0
-    );
+    assert_eq!(count(&e, "ДЕПЛОЙ", true), 0);
     assert_eq!(e.status().unwrap().messages, 6);
+}
 
-    // Resume: launcher gets the workdir and the agent command.
+#[test]
+fn resume_launches_the_agent_in_its_workdir() {
+    let (f, e) = synced();
     let ok = e.resume(CODEX_ID).unwrap();
     assert!(ok.ok);
     assert!(ok.command.ends_with(&format!("codex resume {CODEX_ID}")));
@@ -295,22 +294,33 @@ fn index_search_context_incremental_resume() {
     assert_eq!(launched.len(), 1);
     assert_eq!(launched[0].0, f.workdir);
     assert_eq!(launched[0].1, ["codex", "resume", CODEX_ID]);
+}
 
-    assert_eq!(e.resume("nope; rm -rf /").unwrap_err().status, 400);
+#[test]
+fn resume_rejects_bad_and_unknown_ids() {
+    let (_f, e) = synced();
+    assert_eq!(e.resume("nope; rm -rf /").unwrap_err().status(), 400);
+    let missing = e
+        .resume("00000000-0000-0000-0000-000000000000")
+        .unwrap_err();
     assert_eq!(
-        e.resume("00000000-0000-0000-0000-000000000000")
-            .unwrap_err()
-            .status,
-        404
+        (missing.status(), missing.message()),
+        (404, "Разговор не найден")
     );
+}
 
-    // Workdir gone → 409 with the command still returned.
+#[test]
+fn resume_refused_when_the_workdir_is_gone() {
+    let (f, e) = synced();
     std::fs::remove_dir_all(&f.workdir).unwrap();
     let err = e.resume(CODEX_ID).unwrap_err();
-    assert_eq!(err.status, 409);
-    assert!(err.command.unwrap().contains("codex resume"));
-    let v = search(&e, "сборку", false);
-    assert_eq!(v["results"][0]["workdirExists"], false);
+    assert_eq!(err.status(), 409);
+    assert!(err.command().unwrap().contains("codex resume"));
+    assert!(f.launched.lock().unwrap().is_empty());
+    assert_eq!(
+        search(&e, "сборку", false)["results"][0]["workdirExists"],
+        false
+    );
 }
 
 #[test]
@@ -323,8 +333,8 @@ fn deleted_transcripts_stay_searchable() {
     let v = search(&e, "ДЕПЛОЙ", false);
     assert_eq!(v["results"].as_array().unwrap().len(), 1);
     let err = e.resume(CLAUDE_ID).unwrap_err();
-    assert_eq!(err.status, 409);
-    assert!(err.command.unwrap().contains("claude --resume"));
+    assert_eq!(err.status(), 409);
+    assert!(err.command().unwrap().contains("claude --resume"));
 }
 
 #[test]

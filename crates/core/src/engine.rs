@@ -1,182 +1,45 @@
-//! The index as a whole: storage, background sync status, search, context, resume.
-//! All methods are blocking; call them off the async runtime.
+//! Facade of the core: owns the index connections, the background sync status
+//! and the live-session cache, and exposes search, context and resume to the
+//! app. All methods are blocking; call them off the async runtime.
 
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use anyhow::Result;
 use rusqlite::Connection;
-use serde::Serialize;
 
-use crate::db::{self, iso, iso_opt};
-use crate::indexer::{self, SyncResult};
-use crate::live::{LiveCache, LiveMap};
-use crate::provider::{Provider, Roots};
-use crate::query::{build_snippet, fold, parse_query, query_is_valid, Snippet};
-use crate::terminal::{self, MacTerminal, TargetOs};
+use crate::error::{Error, Result};
+use crate::models::messages as msg;
+use crate::models::time::{iso, iso_opt};
+use crate::models::{
+    ContextMessage, EngineConfig, IndexStatus, MacTerminal, Provider, ProviderStatus,
+    ResumeResponse, Roots, SearchParams, SearchResponse, Status, SyncResult,
+};
+use crate::platform::{self, FsProbe, OsFs, OsProcesses, OsTerminal};
+use crate::services::command::valid_id;
+use crate::services::indexer;
+use crate::services::launch_plan;
+use crate::services::live::LiveCache;
+use crate::services::query::{fold, parse_query, query_is_valid, MIN_QUERY_CHARS};
+use crate::services::resume::{self, ResumeChecks};
+use crate::services::search::{self as search_svc, CardContext, MAX_ROWS};
+use crate::sources::registry::ClaudeRegistry;
+use crate::storage::{self, messages, sessions};
 
-pub const MAX_ROWS: usize = 600;
-pub const HITS_PER_SESSION: usize = 3;
-pub const DEFAULT_LIMIT: usize = 40;
+/// How resume opens a terminal: `(workdir, argv)` (replaceable in tests).
+pub type Launcher = dyn Fn(&Path, &[String]) -> anyhow::Result<()> + Send + Sync;
+
+/// The system terminal for the chosen macOS terminal app.
+fn system_launcher(mac_terminal: MacTerminal) -> Box<Launcher> {
+    Box::new(move |dir, argv| {
+        launch_plan::launch(&OsTerminal, platform::current_os(), mac_terminal, dir, argv)
+    })
+}
+
+/// Messages shown on each side of a hit in the context view.
 pub const CONTEXT_RADIUS: i64 = 3;
-
-/// An error with an HTTP status, rendered as `{statusCode, message}`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApiError {
-    pub status: u16,
-    pub message: String,
-    /// For resume errors: the command to run by hand.
-    pub command: Option<String>,
-}
-
-impl ApiError {
-    pub fn new(status: u16, message: impl Into<String>) -> Self {
-        ApiError {
-            status,
-            message: message.into(),
-            command: None,
-        }
-    }
-    pub fn bad_request(m: impl Into<String>) -> Self {
-        Self::new(400, m)
-    }
-    pub fn not_found(m: impl Into<String>) -> Self {
-        Self::new(404, m)
-    }
-    pub fn internal(e: impl std::fmt::Display) -> Self {
-        Self::new(500, e.to_string())
-    }
-    fn with_command(mut self, c: &str) -> Self {
-        self.command = Some(c.to_owned());
-        self
-    }
-}
-
-impl std::fmt::Display for ApiError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.status, self.message)
-    }
-}
-
-impl std::error::Error for ApiError {}
-
-impl From<anyhow::Error> for ApiError {
-    fn from(e: anyhow::Error) -> Self {
-        ApiError::internal(format!("{e:#}"))
-    }
-}
-
-pub type ApiResult<T> = std::result::Result<T, ApiError>;
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum LiveState {
-    External { pid: u32 },
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptHit {
-    pub message_id: i64,
-    pub seq: i64,
-    pub role: String,
-    pub at: Option<String>,
-    pub snippet: Snippet,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptResult {
-    pub id: String,
-    pub provider: String,
-    pub title: Option<String>,
-    pub workdir: Option<String>,
-    pub kind: Option<String>,
-    pub git_branch: Option<String>,
-    pub started_at: Option<String>,
-    pub last_at: Option<String>,
-    pub message_count: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub live: Option<LiveState>,
-    pub workdir_exists: bool,
-    /// Command to continue the conversation in one's own terminal.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resume_command: Option<String>,
-    pub matches: usize,
-    pub hits: Vec<TranscriptHit>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SearchResponse {
-    pub terms: Vec<String>,
-    pub results: Vec<TranscriptResult>,
-    pub truncated: bool,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SearchParams {
-    pub q: String,
-    pub provider: Option<String>,
-    pub include_headless: bool,
-    pub limit: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ContextMessage {
-    pub id: i64,
-    pub seq: i64,
-    pub role: String,
-    pub at: Option<String>,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IndexStatus {
-    pub running: bool,
-    pub last_run_at: Option<String>,
-    pub last_duration_ms: Option<u64>,
-    pub last_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderStatus {
-    pub provider: Provider,
-    pub root: String,
-    pub exists: bool,
-    pub sessions: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Status {
-    pub sessions: i64,
-    pub messages: i64,
-    pub index: IndexStatus,
-    pub providers: Vec<ProviderStatus>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResumeResponse {
-    pub ok: bool,
-    pub command: String,
-    pub workdir: String,
-}
-
-/// How resume opens a terminal (replaceable in tests).
-pub type Launcher = dyn Fn(&Path, &[String]) -> Result<()> + Send + Sync;
-
-pub struct EngineConfig {
-    pub db_path: PathBuf,
-    pub roots: Roots,
-    pub providers: Vec<Provider>,
-    pub mac_terminal: MacTerminal,
-}
 
 pub struct Engine {
     writer: Mutex<Connection>,
@@ -187,6 +50,7 @@ pub struct Engine {
     stop: AtomicBool,
     status: Mutex<IndexStatus>,
     live: LiveCache,
+    fs: Box<dyn FsProbe>,
     launcher: Box<Launcher>,
 }
 
@@ -195,16 +59,10 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Engine {
-    pub fn open(cfg: EngineConfig) -> Result<Self> {
-        let writer = db::open(&cfg.db_path)?;
-        let reader = db::open(&cfg.db_path)?;
-        let sessions_dir = cfg
-            .roots
-            .claude
-            .parent()
-            .map(|p| p.join("sessions"))
-            .unwrap_or_else(|| PathBuf::from("sessions"));
-        let mac_terminal = cfg.mac_terminal;
+    pub fn open(cfg: EngineConfig) -> anyhow::Result<Self> {
+        let writer = storage::open(&cfg.db_path)?;
+        let reader = storage::open(&cfg.db_path)?;
+        let registry = ClaudeRegistry::for_roots(&cfg.roots);
         Ok(Engine {
             writer: Mutex::new(writer),
             reader: Mutex::new(reader),
@@ -213,8 +71,9 @@ impl Engine {
             running: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             status: Mutex::new(IndexStatus::default()),
-            live: LiveCache::new(sessions_dir),
-            launcher: Box::new(move |dir, argv| terminal::launch(mac_terminal, dir, argv)),
+            live: LiveCache::new(Box::new(OsProcesses), Box::new(registry)),
+            fs: Box::new(OsFs),
+            launcher: system_launcher(cfg.mac_terminal),
         })
     }
 
@@ -270,10 +129,11 @@ impl Engine {
         out
     }
 
-    pub fn status(&self) -> ApiResult<Status> {
+    pub fn status(&self) -> Result<Status> {
         let conn = lock(&self.reader);
-        let (sessions, messages) = db::stats(&conn)?;
-        let counts: HashMap<String, i64> = db::sessions_by_provider(&conn)?.into_iter().collect();
+        let (sessions, messages) = sessions::stats(&conn)?;
+        let counts: HashMap<String, i64> =
+            sessions::sessions_by_provider(&conn)?.into_iter().collect();
         drop(conn);
         let mut index = lock(&self.status).clone();
         index.running = self.running.load(Ordering::SeqCst);
@@ -285,7 +145,7 @@ impl Engine {
                 ProviderStatus {
                     provider: p,
                     root: root.to_string_lossy().into_owned(),
-                    exists: root.is_dir(),
+                    exists: self.fs.is_dir(root),
                     sessions: counts.get(p.as_str()).copied().unwrap_or(0),
                 }
             })
@@ -295,15 +155,16 @@ impl Engine {
             messages,
             index,
             providers,
+            min_query_length: MIN_QUERY_CHARS,
         })
     }
 
     /// All words/phrases must occur in one message (case-insensitive).
     /// Sessions freshest first, up to 3 hits each.
-    pub fn search(&self, params: &SearchParams) -> ApiResult<SearchResponse> {
+    pub fn search(&self, params: &SearchParams) -> Result<SearchResponse> {
         let terms = parse_query(&params.q);
         if !query_is_valid(&terms) {
-            return Err(ApiError::bad_request("Введите хотя бы 2 символа"));
+            return Err(Error::bad_request(msg::query_too_short()));
         }
         let terms_lc: Vec<String> = terms.iter().map(|t| fold(t)).collect();
         let provider = params
@@ -311,57 +172,38 @@ impl Engine {
             .as_deref()
             .filter(|p| p.parse::<Provider>().is_ok());
         let conn = lock(&self.reader);
-        let rows = db::find_messages(
+        let rows = messages::find(
             &conn,
             &terms_lc,
             provider,
             params.include_headless,
             MAX_ROWS,
         )?;
-
-        let mut order: Vec<String> = Vec::new();
-        let mut by_session: HashMap<String, Vec<db::MessageRow>> = HashMap::new();
-        for r in &rows {
-            let list = by_session.entry(r.session_id.clone()).or_insert_with(|| {
-                order.push(r.session_id.clone());
-                Vec::new()
-            });
-            list.push(r.clone());
-        }
-        let limit = params.limit.unwrap_or(DEFAULT_LIMIT).min(100);
-        let ids: Vec<String> = order.iter().take(limit).cloned().collect();
-        let sessions = db::get_sessions(&conn, &ids)?;
+        let grouped = search_svc::group_by_session(&rows);
+        let limit = search_svc::effective_limit(params.limit);
+        let ids: Vec<String> = grouped.order.iter().take(limit).cloned().collect();
+        let found = sessions::get_sessions(&conn, &ids)?;
         drop(conn);
         let live = self.live.get();
-        let mut results = Vec::with_capacity(sessions.len());
-        for s in sessions {
-            let hits = &by_session[&s.id];
-            let mut result = to_result(s, &live);
-            result.matches = hits.len();
-            result.hits = hits
-                .iter()
-                .take(HITS_PER_SESSION)
-                .map(|h| TranscriptHit {
-                    message_id: h.id,
-                    seq: h.seq,
-                    role: h.role.clone(),
-                    at: iso_opt(h.at),
-                    snippet: build_snippet(&h.text, &terms),
-                })
-                .collect();
-            results.push(result);
-        }
-        Ok(SearchResponse {
+        let ctx = CardContext {
+            live: &live,
+            fs: self.fs.as_ref(),
+            os: platform::current_os(),
+        };
+        Ok(search_svc::assemble(
             terms,
-            results,
-            truncated: rows.len() >= MAX_ROWS || by_session.len() > limit,
-        })
+            rows.len(),
+            &grouped,
+            found,
+            limit,
+            &ctx,
+        ))
     }
 
     /// Messages around a hit (full text).
-    pub fn context(&self, session_id: &str, seq: i64) -> ApiResult<Vec<ContextMessage>> {
+    pub fn context(&self, session_id: &str, seq: i64) -> Result<Vec<ContextMessage>> {
         let conn = lock(&self.reader);
-        let rows = db::context(
+        let rows = messages::range(
             &conn,
             session_id,
             (seq - CONTEXT_RADIUS).max(0),
@@ -380,98 +222,30 @@ impl Engine {
     }
 
     /// Opens the conversation in a new terminal window in its workdir.
-    pub fn resume(&self, id: &str) -> ApiResult<ResumeResponse> {
-        if !terminal::valid_id(id) {
-            return Err(ApiError::bad_request("Некорректный id разговора"));
+    pub fn resume(&self, id: &str) -> Result<ResumeResponse> {
+        if !valid_id(id) {
+            return Err(Error::bad_request(msg::BAD_SESSION_ID));
         }
         let session = {
             let conn = lock(&self.reader);
-            db::get_session(&conn, id)?
+            sessions::get_session(&conn, id)?
         }
-        .ok_or_else(|| ApiError::not_found("Разговор не найден"))?;
-        let provider: Provider = session
-            .provider
-            .parse()
-            .map_err(|e: String| ApiError::internal(e))?;
-        let workdir = session
-            .workdir
-            .clone()
-            .ok_or_else(|| ApiError::bad_request("Папка разговора неизвестна"))?;
-        let argv = provider.resume_argv(&session.id, &session.file_path);
-        let command = terminal::copy_command(TargetOs::current(), &workdir, &argv);
-        if let Some(pid) = self.live.get().get(&session.id.to_lowercase()) {
-            return Err(
-                ApiError::new(409, format!("Разговор уже открыт в терминале (pid {pid})"))
-                    .with_command(&command),
-            );
-        }
-        if !Path::new(&workdir).is_dir() {
-            return Err(
-                ApiError::new(409, format!("Папка разговора не найдена: {workdir}"))
-                    .with_command(&command),
-            );
-        }
-        if !Path::new(&session.file_path).is_file() {
-            return Err(ApiError::new(
-                409,
-                "Агент уже удалил файл этого разговора — продолжить нельзя, текст остался только в поиске",
-            )
-            .with_command(&command));
-        }
-        (self.launcher)(Path::new(&workdir), &argv).map_err(|e| {
-            ApiError::new(500, format!("Не удалось открыть терминал: {e:#}")).with_command(&command)
-        })?;
+        .ok_or_else(|| Error::not_found(msg::SESSION_NOT_FOUND))?;
+        let target = resume::target(&session, platform::current_os())?;
+        resume::check(
+            &target,
+            ResumeChecks {
+                live_pid: self.live.get().get(&session.id.to_lowercase()).copied(),
+                workdir_exists: self.fs.is_dir(Path::new(&target.workdir)),
+                file_exists: self.fs.is_file(Path::new(&session.file_path)),
+            },
+        )?;
+        (self.launcher)(Path::new(&target.workdir), &target.argv)
+            .map_err(|e| resume::launch_failed(&target, &e))?;
         Ok(ResumeResponse {
             ok: true,
-            command,
-            workdir,
+            command: target.command,
+            workdir: target.workdir,
         })
     }
-
-    /// Copy command for a session without launching (CLI).
-    pub fn resume_command(&self, id: &str) -> ApiResult<String> {
-        let conn = lock(&self.reader);
-        let s =
-            db::get_session(&conn, id)?.ok_or_else(|| ApiError::not_found("Разговор не найден"))?;
-        session_command(&s).ok_or_else(|| ApiError::internal("unknown provider"))
-    }
-}
-
-/// `cd <workdir> && <agent resume command>` for the current OS (just the
-/// agent command when the workdir is unknown).
-fn session_command(s: &db::SessionRow) -> Option<String> {
-    let provider: Provider = s.provider.parse().ok()?;
-    let argv = provider.resume_argv(&s.id, &s.file_path);
-    Some(match s.workdir.as_deref() {
-        Some(w) => terminal::copy_command(TargetOs::current(), w, &argv),
-        None => argv.join(" "),
-    })
-}
-
-fn to_result(t: db::SessionRow, live: &LiveMap) -> TranscriptResult {
-    let workdir_exists = t.workdir.as_deref().is_some_and(|w| Path::new(w).is_dir());
-    TranscriptResult {
-        live: live
-            .get(&t.id.to_lowercase())
-            .map(|&pid| LiveState::External { pid }),
-        resume_command: session_command(&t),
-        id: t.id,
-        provider: t.provider,
-        title: t.title,
-        workdir: t.workdir,
-        kind: t.kind,
-        git_branch: t.git_branch,
-        started_at: iso_opt(t.started_at),
-        last_at: iso_opt(t.last_at),
-        message_count: t.message_count,
-        workdir_exists,
-        matches: 0,
-        hits: Vec::new(),
-    }
-}
-
-/// Unique providers in a stable order.
-pub fn dedup_providers(list: &[Provider]) -> Vec<Provider> {
-    let mut seen = HashSet::new();
-    list.iter().copied().filter(|p| seen.insert(*p)).collect()
 }

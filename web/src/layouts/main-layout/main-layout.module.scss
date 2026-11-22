@@ -1,0 +1,13 @@
+@use 'breakpoints' as bp;
+
+// Контейнер страницы, как .content/.contentInner в main-layout builder.
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px;
+  box-sizing: border-box;
+
+  @include bp.mobile {
+    padding: 16px;
+  }
+}

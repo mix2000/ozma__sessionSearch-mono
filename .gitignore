@@ -8,3 +8,6 @@
 
 # Local release builds
 /dist/
+
+# Root tooling (husky)
+/node_modules/

@@ -1,0 +1,10 @@
+.contextMsg {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+}
+
+.contextCurrent {
+  background: var(--ss-mark-soft);
+  border-radius: 6px;
+  padding: 8px;
+}

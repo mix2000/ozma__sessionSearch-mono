@@ -1,0 +1,27 @@
+.sources {
+  max-width: min(420px, calc(100vw - 48px));
+}
+
+.source {
+  padding: 6px 0;
+
+  & + & {
+    border-top: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+  }
+}
+
+.sourceHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.sourceMissing {
+  opacity: 0.5;
+}
+
+.path {
+  font-size: 12px;
+  word-break: break-all;
+}

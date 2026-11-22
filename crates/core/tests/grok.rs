@@ -98,16 +98,30 @@ fn count(v: &Value) -> usize {
     v["results"].as_array().unwrap().len()
 }
 
-#[test]
-fn grok_build_sessions() {
+/// Grok Build sessions: a main one (streaming reply at EOF), one in a hashed
+/// folder, a headless, a subagent and a hidden one.
+struct Build {
+    tmp: tempfile::TempDir,
+    workdir: PathBuf,
+    main: PathBuf,
+}
+
+fn build_fixture() -> Build {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let workdir = root.join("my proj");
     std::fs::create_dir_all(&workdir).unwrap();
     let sessions = root.join("grok/sessions");
     let group = sessions.join(encode(&workdir));
+    let main = write_main_session(&group);
+    write_other_sessions(&sessions, &group, &workdir);
+    Build { workdir, main, tmp }
+}
 
-    let main = write_session(
+/// The main session: joined prompt chunks, a thought, a tool call, a shell
+/// command and a reply still being streamed at EOF.
+fn write_main_session(group: &Path) -> PathBuf {
+    write_session(
         &group.join(BUILD_ID),
         json!({"info": {"id": BUILD_ID}, "generated_title": "Деплой nginx",
                "created_at": "2026-11-01T10:00:00Z", "last_active_at": "2026-11-01T10:05:00Z",
@@ -126,7 +140,11 @@ fn grok_build_sessions() {
             // Still being streamed at EOF.
             upd(1_793_000_007, "agent_message_chunk", text("Начинаю"), json!({})),
         ],
-    );
+    )
+}
+
+/// A hashed-folder session (cwd in `.cwd`), a headless, a subagent and a hidden one.
+fn write_other_sessions(sessions: &Path, group: &Path, workdir: &Path) {
     // Long cwd: hashed folder name + .cwd file.
     let hashed = sessions.join("my-proj-0123456789abcdef");
     std::fs::create_dir_all(&hashed).unwrap();
@@ -171,12 +189,27 @@ fn grok_build_sessions() {
             json!({}),
         )],
     );
+}
 
-    let e = engine(root);
-    let r = e.sync();
+/// The Build fixture indexed once.
+fn build_synced() -> (Build, Engine) {
+    let b = build_fixture();
+    let e = engine(b.tmp.path());
+    e.sync();
+    (b, e)
+}
+
+#[test]
+fn build_skips_subagent_and_hidden_sessions() {
+    let b = build_fixture();
+    let r = engine(b.tmp.path()).sync();
     assert_eq!(r.files, 3, "subagent and hidden sessions are skipped");
     assert_eq!(r.messages, 3 + 1 + 1);
+}
 
+#[test]
+fn build_session_cards() {
+    let (b, e) = build_synced();
     let v = search(&e, "nginx", false);
     let ids: Vec<&str> = v["results"]
         .as_array()
@@ -190,7 +223,7 @@ fn grok_build_sessions() {
     assert_eq!(main_r["title"], "Деплой nginx");
     assert_eq!(main_r["gitBranch"], "main");
     assert_eq!(main_r["kind"], "interactive");
-    assert_eq!(main_r["workdir"], workdir.to_string_lossy().as_ref());
+    assert_eq!(main_r["workdir"], b.workdir.to_string_lossy().as_ref());
     assert_eq!(main_r["workdirExists"], true);
     assert_eq!(main_r["startedAt"], "2026-11-01T10:00:00.000Z");
     assert!(main_r["resumeCommand"]
@@ -198,12 +231,15 @@ fn grok_build_sessions() {
         .unwrap()
         .ends_with(&format!("grok --resume {BUILD_ID}")));
     assert_eq!(main_r["matches"], 2);
-    assert_eq!(
-        v["results"][1]["workdir"],
-        workdir.to_string_lossy().as_ref()
-    );
-    assert_eq!(v["results"][1]["title"], "Hashed");
+    let hashed = &v["results"][1];
+    assert_eq!(hashed["workdir"], b.workdir.to_string_lossy().as_ref());
+    assert_eq!(hashed["title"], "Hashed");
     assert_eq!(count(&search(&e, "nginx", true)), 3);
+}
+
+#[test]
+fn build_chunks_are_joined_and_service_parts_skipped() {
+    let (_b, e) = build_synced();
     assert_eq!(
         count(&search(&e, "\"почини деплой\"", false)),
         0,
@@ -229,10 +265,13 @@ fn grok_build_sessions() {
         1,
         "the open reply is searchable"
     );
+}
 
-    // The streamed reply grows: it must stay one message.
+#[test]
+fn build_streamed_reply_stays_one_message() {
+    let (b, e) = build_synced();
     append(
-        &main,
+        &b.main,
         &[
             upd(
                 1_793_000_008,
@@ -249,10 +288,14 @@ fn grok_build_sessions() {
     assert_eq!(v["results"][0]["messageCount"], 3);
     assert_eq!(v["results"][0]["hits"][0]["seq"], 2);
     assert_eq!(count(&search(&e, "\"Начинаю проверку.\"", false)), 1);
+}
 
-    // A second prompt, then a rewind back to prompt 0 drops it.
+#[test]
+fn build_rewind_drops_the_dead_branch() {
+    let (b, e) = build_synced();
+    let turn = |ts| x_upd(ts, json!({"sessionUpdate": "turn_completed"}));
     append(
-        &main,
+        &b.main,
         &[
             upd(
                 1_793_000_010,
@@ -266,14 +309,13 @@ fn grok_build_sessions() {
                 text("kubernetes ответ"),
                 json!({}),
             ),
-            x_upd(1_793_000_012, json!({"sessionUpdate": "turn_completed"})),
+            turn(1_793_000_012),
         ],
     );
-    let r = e.sync();
-    assert_eq!(r.messages, 2);
+    assert_eq!(e.sync().messages, 2);
     assert_eq!(count(&search(&e, "kubernetes", false)), 1);
     append(
-        &main,
+        &b.main,
         &[
             x_upd(
                 1_793_000_013,
@@ -285,7 +327,7 @@ fn grok_build_sessions() {
                 text("docker вместо"),
                 json!({"promptIndex": 1}),
             ),
-            x_upd(1_793_000_015, json!({"sessionUpdate": "turn_completed"})),
+            turn(1_793_000_015),
         ],
     );
     e.sync();
@@ -294,10 +336,12 @@ fn grok_build_sessions() {
         0,
         "rewound branch removed"
     );
-    let v = search(&e, "docker", false);
-    assert_eq!(v["results"][0]["messageCount"], 4);
+    assert_eq!(search(&e, "docker", false)["results"][0]["messageCount"], 4);
+}
 
-    // Context and resume.
+#[test]
+fn build_context_and_resume() {
+    let (_b, e) = build_synced();
     let ctx = e.context(BUILD_ID, 0).unwrap();
     assert_eq!(ctx[0].text, "почини\n\nдеплой nginx");
     assert!(e
@@ -322,8 +366,15 @@ fn make_cli_db(path: &Path) -> Connection {
     c
 }
 
-#[test]
-fn grok_cli_database() {
+/// A grok-cli database with one session; the connection stays open (WAL)
+/// like grok-cli's own while we read.
+struct Cli {
+    tmp: tempfile::TempDir,
+    workdir: PathBuf,
+    src: Connection,
+}
+
+fn cli_fixture() -> Cli {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let workdir = root.join("ws");
@@ -375,10 +426,20 @@ fn grok_cli_database() {
         .unwrap();
     }
 
-    // grok-cli keeps its connection open (WAL) while we read.
-    let e = engine(root);
+    Cli { tmp, workdir, src }
+}
+
+fn cli_synced() -> (Cli, Engine) {
+    let c = cli_fixture();
+    let e = engine(c.tmp.path());
     let r = e.sync();
     assert_eq!((r.updated, r.messages), (1, 2));
+    (c, e)
+}
+
+#[test]
+fn cli_session_card() {
+    let (c, e) = cli_synced();
     let v = search(&e, "nginx", true);
     assert_eq!(count(&v), 1);
     let res = &v["results"][0];
@@ -386,7 +447,7 @@ fn grok_cli_database() {
     assert_eq!(res["provider"], "grok");
     assert_eq!(res["kind"], "interactive");
     assert_eq!(res["title"], "настрой nginx");
-    assert_eq!(res["workdir"], workdir.to_string_lossy().as_ref());
+    assert_eq!(res["workdir"], c.workdir.to_string_lossy().as_ref());
     assert_eq!(
         res["matches"], 2,
         "system, tool and reasoning parts are skipped"
@@ -396,38 +457,42 @@ fn grok_cli_database() {
         .as_str()
         .unwrap()
         .ends_with(&format!("grok -s {CLI_ID}")));
-
     // Unchanged database: nothing to do.
     assert_eq!(e.sync().updated, 0);
+}
 
-    // New message + updated_at bump: incremental import.
-    src.execute(
-        "INSERT INTO messages VALUES (?1, 4, 'user', ?2, '2026-11-02T09:00:00.000Z')",
-        params![
-            CLI_ID,
-            json!({"role": "user", "content": [{"type": "text", "text": "и ещё redis"}]})
-                .to_string()
-        ],
-    )
-    .unwrap();
-    src.execute(
-        "UPDATE sessions SET updated_at = '2026-11-02T09:00:00.000Z', title = 'Nginx и Redis', cwd_last = ?2 WHERE id = ?1",
-        params![CLI_ID, workdir.to_string_lossy()],
-    )
-    .unwrap();
+#[test]
+fn cli_new_messages_are_imported_incrementally() {
+    let (c, e) = cli_synced();
+    let msg = json!({"role": "user", "content": [{"type": "text", "text": "и ещё redis"}]});
+    c.src
+        .execute(
+            "INSERT INTO messages VALUES (?1, 4, 'user', ?2, '2026-11-02T09:00:00.000Z')",
+            params![CLI_ID, msg.to_string()],
+        )
+        .unwrap();
+    c.src
+        .execute(
+            "UPDATE sessions SET updated_at = '2026-11-02T09:00:00.000Z', title = 'Nginx и Redis', cwd_last = ?2 WHERE id = ?1",
+            params![CLI_ID, c.workdir.to_string_lossy()],
+        )
+        .unwrap();
     let r = e.sync();
     assert_eq!((r.updated, r.messages), (1, 1));
     let v = search(&e, "redis", false);
     assert_eq!(v["results"][0]["messageCount"], 3);
     assert_eq!(v["results"][0]["title"], "Nginx и Redis");
     assert_eq!(v["results"][0]["hits"][0]["seq"], 2);
+}
 
+#[test]
+fn cli_resume_uses_dash_s_and_never_writes_the_db() {
+    let (c, e) = cli_synced();
     let ok = e.resume(CLI_ID).unwrap();
     assert!(ok.command.ends_with(&format!("grok -s {CLI_ID}")));
-
-    // Our index never wrote to grok.db.
-    let n: i64 = src
+    let n: i64 = c
+        .src
         .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(n, 5);
+    assert_eq!(n, 4);
 }

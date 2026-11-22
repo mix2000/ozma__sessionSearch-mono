@@ -1,0 +1,15 @@
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.hint {
+  font-size: 12px;
+
+  @media (pointer: coarse) {
+    display: none;
+  }
+}

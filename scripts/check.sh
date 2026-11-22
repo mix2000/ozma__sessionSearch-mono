@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Все проверки разом — то же, что CI (кроме e2e: `make e2e`).
+set -euo pipefail
+export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
+cd "$(dirname "$0")/.."
+
+step() { printf '\n== %s\n' "$*"; }
+
+step "web: format:check, lint, typecheck, test:coverage"
+(cd web && npm run check)
+
+step "rust: fmt"
+cargo fmt --all --check
+step "rust: clippy"
+cargo clippy --all-targets --locked -- -D warnings
+step "rust: test"
+cargo test --locked
+
+step "guards"
+bash scripts/guards.sh
+
+printf '\nВсе проверки пройдены.\n'

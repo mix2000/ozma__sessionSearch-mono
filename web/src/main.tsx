@@ -1,31 +1,21 @@
-import "antd/dist/reset.css";
-import "./styles/global.scss";
+import 'antd/dist/reset.css';
+import './styles/global.scss';
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 
-import { captureTokenFromUrl } from "./api/client";
-import { App } from "./App";
+import { captureTokenFromUrl } from 'common/services/api';
+import { QueryProvider } from 'providers';
+
+import { App } from './app';
 
 // До первого запроса: ?token=… → sessionStorage, адрес — без токена.
 captureTokenFromUrl();
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchIntervalInBackground: false,
-      refetchOnWindowFocus: false,
-      staleTime: 30_000,
-      retry: 1,
-    },
-  },
-});
-
-createRoot(document.getElementById("root")!).render(
+createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
+    <QueryProvider>
       <App />
-    </QueryClientProvider>
-  </StrictMode>,
+    </QueryProvider>
+  </StrictMode>
 );

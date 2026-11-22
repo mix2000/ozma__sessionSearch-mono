@@ -1,28 +1,25 @@
 //! Core of ozma Session Search: finds Claude Code / Codex / Grok transcripts on
 //! disk, keeps an incremental SQLite index of the conversation text and
 //! searches it.
+//!
+//! Layers: [`models`] (types and API DTOs) → `sources` (transcript formats on
+//! disk) → `storage` (SQLite index) → `services` (indexing, search, resume
+//! rules) → [`Engine`] (facade). OS-specific code lives in `platform`.
 
-pub mod db;
-pub mod engine;
-pub mod grok_db;
-pub mod indexer;
-pub mod live;
-pub mod parse;
-pub mod provider;
-pub mod query;
-pub mod terminal;
+mod engine;
+mod error;
+pub mod models;
+mod platform;
+mod services;
+mod sources;
+mod storage;
 
-pub use engine::{
-    ApiError, ApiResult, ContextMessage, Engine, EngineConfig, IndexStatus, LiveState,
-    ResumeResponse, SearchParams, SearchResponse, Status, TranscriptHit, TranscriptResult,
+pub use engine::{Engine, Launcher};
+pub use error::{Error, Result};
+pub use models::{
+    ContextMessage, EngineConfig, IndexStatus, LiveState, MacTerminal, Provider, ProviderStatus,
+    ResumeResponse, Roots, SearchParams, SearchResponse, Snippet, Status, SyncResult,
+    TranscriptHit, TranscriptResult,
 };
-pub use indexer::SyncResult;
-pub use provider::{Provider, Roots};
-pub use terminal::MacTerminal;
-
-/// Default data dir: `<OS data dir>/ozma-session-search`.
-pub fn default_data_dir() -> std::path::PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| ".".into()))
-        .join("ozma-session-search")
-}
+pub use platform::paths::default_data_dir;
+pub use services::agents::dedup_providers;

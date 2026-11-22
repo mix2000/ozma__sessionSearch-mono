@@ -1,0 +1,19 @@
+{
+  "name": "ozma-session-search",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Корень репо: git-хуки (husky) и общие команды проверок для web/ и crates/.",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "prepare": "husky",
+    "check": "bash scripts/check.sh",
+    "guards": "bash scripts/guards.sh",
+    "test": "npm test --prefix web && cargo test",
+    "test:e2e": "npm run test:e2e --prefix web"
+  },
+  "devDependencies": {
+    "husky": "9.1.7"
+  }
+}

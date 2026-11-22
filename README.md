@@ -13,6 +13,7 @@ Builder. API и JSON те же (`/api/agents/transcripts/*`).
 ```bash
 session-search            # индекс + интерфейс, откроется браузер (http://127.0.0.1:4477)
 session-search serve --no-open --port 4477
+session-search serve --skip-ports 38000,48000   # не занимать эти порты при поиске свободного (или SESSION_SEARCH_SKIP_PORTS)
 session-search search "telegram \"report work\"" --json
 session-search sync       # обновить индекс
 session-search status
@@ -88,17 +89,51 @@ Claude сам удаляет старые транскрипты (через 30 
 ## Разработка
 
 ```bash
-cd web && npm ci && npm run build && cd ..   # интерфейс → web/dist (встраивается в бинарь)
+make install                                  # npm-зависимости (корень и web/) + git-хуки (husky)
+cd web && npm run build && cd ..              # интерфейс → web/dist (встраивается в бинарь)
 cargo build --release                         # target/release/session-search
-cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 cd web && npm run dev                         # интерфейс с прокси /api → 127.0.0.1:4477
+cd web && npm run mock                        # мок API без бэкенда (MOCK_PORT, по умолчанию 4478)
 ```
 
-- `crates/core` — источники (`parse/claude|codex|grok`), индекс SQLite, поиск,
-  открытые процессы, запуск терминала.
-- `crates/app` — сервер axum, встроенный интерфейс, командная строка.
-- `web/` — React + antd.
-- CI (`.github/workflows/check.yml`) — только проверки на macOS и Windows.
+- `crates/core` — по слоям: `models/` (типы и DTO), `sources/` (форматы
+  Claude/Codex/Grok на диске), `storage/` (индекс SQLite), `services/`
+  (индексация, поиск, правила продолжения, открытые процессы), `platform/`
+  (всё, что зависит от ОС: запуск терминала, процессы, пути), `engine.rs` — фасад.
+- `crates/app` — библиотека + бинарь: `http/` (router, handlers, dto, error,
+  middleware, встроенный интерфейс) и `cli/` (аргументы и команды).
+- `web/` — React + antd по образцу CheerPortal: `common/services/{api,theme}`,
+  `common/{components,hooks,utils,consts,types}`, `providers/`, `layouts/`,
+  `entities/transcripts/{search,context,components,utils}` с `models.ts`
+  (интерфейсы `I…`), `transcripts.api.ts` и явными реэкспортами в `index.ts`.
+
+## Разработка и проверки
+
+| Команда | Что делает |
+|---|---|
+| `make check` / `npm run check` | всё, что проверяет CI, кроме e2e: prettier, eslint, tsc, vitest с порогами покрытия, `cargo fmt`, `clippy -D warnings`, `cargo test`, сторожа |
+| `make test` / `npm test` | юнит- и интеграционные тесты web и Rust |
+| `make e2e` / `npm run test:e2e` | Playwright на моке API: сам поднимает мок (4597) и vite (5197) и гасит их; порты — `E2E_MOCK_PORT`, `E2E_WEB_PORT` |
+| `make guards` / `npm run guards` | сторожа `@guard`: web — файл ≤ 500 строк, нет `export *`, сеть только в `common/services/api`, кириллица только в `*.consts.ts`, нет глубоких импортов между сущностями, нет inline-`style`; Rust (`crates/core/tests/guards.rs`) — файл ≤ 500 строк, `cfg(target_os/unix/windows)` только в `platform/`, слои (`models` без I/O и часов, `services` без прямого I/O и конкретных платформ, `platform`/`storage` без `services`) |
+| `make coverage` | покрытие: `vitest --coverage` и `cargo llvm-cov` (нужен `cargo install cargo-llvm-cov`) |
+| `make fmt` | prettier + `cargo fmt` |
+| `make release` | релизные сборки (`scripts/release.sh`) |
+
+В `web/`: `npm run format`, `format:check`, `lint`, `typecheck`, `test`,
+`test:coverage`, `test:e2e`, `check`.
+
+Тесты Rust: модульные — рядом с кодом (`#[cfg(test)]`); интеграционные —
+`crates/core/tests` (индексация и поиск на фикстурах), `crates/app/tests/http.rs`
+(API через `tower::ServiceExt::oneshot`: коды, формы JSON, 403 на чужой Host,
+токен), `crates/app/tests/cli.rs` (бинарь через `assert_cmd`), `crates/core/tests/guards.rs` (сторож).
+
+Git-хуки (husky, ставятся `npm install` в корне; сеть не нужна):
+- **pre-commit** — гард против `.env`/ключей в индексе, `eslint --fix` + prettier
+  по staged-файлам `web/` (lint-staged), `cargo fmt --check` при изменённых `.rs`;
+- **pre-push** — по затронутой части: web `lint` + `typecheck` + `test`,
+  Rust `clippy -D warnings` + `cargo test` (всё с `--locked`), затем сторожа. Обойти: `git push --no-verify`.
+
+CI (`.github/workflows/check.yml`) — те же шаги на macOS и Windows, e2e — на macOS.
 
 ## Релиз
 

@@ -1,0 +1,21 @@
+@use 'breakpoints' as bp;
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.search {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+
+.providerSelect {
+  width: 150px;
+
+  @include bp.mobile {
+    flex: 1 1 150px;
+  }
+}

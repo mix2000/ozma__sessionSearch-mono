@@ -12,14 +12,26 @@ const proxy = {
   '/api': { target: API_TARGET, changeOrigin: true },
 };
 
+const src = (dir: string) => path.resolve(__dirname, './src', dir);
+
 export default defineConfig({
   base: '/',
   plugins: [react()],
+  // Абсолютные импорты от src (tsconfig.app.json → paths).
+  resolve: {
+    alias: {
+      common: src('common'),
+      entities: src('entities'),
+      layouts: src('layouts'),
+      providers: src('providers'),
+      styles: src('styles'),
+    },
+  },
   css: {
     preprocessorOptions: {
       scss: {
         // Позволяет писать @use 'breakpoints' из любого .module.scss.
-        loadPaths: [path.resolve(__dirname, './src/styles')],
+        loadPaths: [src('styles')],
       },
     },
   },
@@ -31,6 +43,32 @@ export default defineConfig({
   server: { host: '127.0.0.1', proxy },
   preview: { host: '127.0.0.1', proxy },
   test: {
-    include: ['src/**/*.test.ts'],
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test-setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+    css: { modules: { classNameStrategy: 'non-scoped' } },
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      // Вне покрытия: тесты и тестовая обвязка, моки, корень (main.tsx, app.tsx),
+      // типы без кода (models.ts, *.types.ts), реэкспорты (index.ts) и тексты (*.consts.ts).
+      exclude: [
+        'src/**/*.test.{ts,tsx}',
+        'src/test-setup.ts',
+        'src/common/test/**',
+        'src/**/mocks/**',
+        'src/main.tsx',
+        'src/app.tsx',
+        'src/vite-env.d.ts',
+        'src/**/index.ts',
+        'src/**/*.consts.ts',
+        'src/**/*.types.ts',
+        'src/**/models.ts',
+        'src/common/types/**',
+      ],
+      // Общий порог обоих проектов (Session Search и VPN Closer).
+      thresholds: { lines: 90, statements: 90, functions: 90, branches: 85 },
+    },
   },
 });

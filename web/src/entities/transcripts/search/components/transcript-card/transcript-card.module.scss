@@ -1,0 +1,37 @@
+.card {
+  :global(.ant-card-head-title) {
+    white-space: normal;
+  }
+}
+
+.cardTitle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+
+  // Длинная ветка/папка не должна вылезать за карточку на телефоне.
+  :global(.ant-tag) {
+    max-width: 100%;
+    margin-inline-end: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+.path {
+  font-size: 12px;
+  word-break: break-all;
+}

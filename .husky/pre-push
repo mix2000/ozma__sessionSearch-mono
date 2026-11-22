@@ -1,0 +1,38 @@
+# Pre-push: быстрые проверки по затронутой части репо — без e2e и без сети.
+# Обойти при необходимости: git push --no-verify
+set -e
+export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
+export CARGO_NET_OFFLINE=true
+
+RANGE=""
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ -z "$local_sha" ] && continue
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac # удаление ветки
+  case "$remote_sha" in
+    *[!0]*) RANGE="$remote_sha..$local_sha" ;;
+    *) RANGE="" ;; # новая ветка — проверяем всё
+  esac
+done
+
+if [ -n "$RANGE" ]; then
+  CHANGED="$(git diff --name-only "$RANGE" 2>/dev/null || echo ALL)"
+else
+  CHANGED="ALL"
+fi
+[ -z "$CHANGED" ] && exit 0
+
+touched() { [ "$CHANGED" = "ALL" ] || printf '%s\n' "$CHANGED" | grep -qE "$1"; }
+
+if touched '^web/'; then
+  echo "pre-push web: lint + typecheck + test"
+  (cd web && npm run lint && npm run typecheck && npm test)
+fi
+
+if touched '^(crates/|Cargo\.(toml|lock)$)'; then
+  echo "pre-push rust: clippy + test"
+  cargo clippy --all-targets --locked -- -D warnings
+  cargo test --locked
+fi
+
+echo "pre-push: guards"
+bash scripts/guards.sh
