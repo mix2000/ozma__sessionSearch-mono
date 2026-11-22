@@ -1,0 +1,2 @@
+{"type":"user","entrypoint":"sdk-cli","cwd":"__WORKDIR__","timestamp":"2026-11-11T01:00:00.000Z","message":{"content":"nightly report nginx"}}
+{"type":"assistant","timestamp":"2026-11-11T01:00:05.000Z","message":{"content":[{"type":"text","text":"Report done"}]}}

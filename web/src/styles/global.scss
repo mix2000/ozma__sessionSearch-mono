@@ -1,0 +1,83 @@
+@use 'breakpoints' as bp;
+
+// Палитра builder (redesign-fix) + тёмный вариант. data-theme ставит App
+// по prefers-color-scheme.
+:root {
+  --pb-bg: #f6f7f9;
+  --pb-border: #e5e7eb;
+  --pb-card-shadow: 0 1px 3px rgba(17, 24, 39, 0.06), 0 1px 2px rgba(17, 24, 39, 0.04);
+  --ss-mark-bg: #ffe58f;
+  --ss-mark-soft: rgba(255, 229, 143, 0.25);
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --pb-bg: #0f1115;
+  --pb-border: #2a2d33;
+  --pb-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --ss-mark-bg: rgba(250, 204, 21, 0.38);
+  --ss-mark-soft: rgba(250, 204, 21, 0.1);
+  color-scheme: dark;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--pb-bg);
+  overflow-x: hidden;
+}
+
+// Карточки: мягкая граница + увеличенный радиус, тень только на hover.
+.ant-card {
+  border-radius: 16px;
+  border: 1px solid var(--pb-border);
+  box-shadow: none;
+  transition: box-shadow 0.15s ease;
+}
+.ant-card:hover {
+  box-shadow: var(--pb-card-shadow);
+}
+
+@include bp.mobile {
+  // Удобный тач: интерактив минимум ~40px.
+  .ant-btn,
+  .ant-select-selector,
+  .ant-input,
+  .ant-input-affix-wrapper {
+    min-height: 40px;
+  }
+
+  .ant-input-affix-wrapper > .ant-input {
+    min-height: 0;
+  }
+
+  .ant-card-body {
+    padding: 16px;
+  }
+
+  h4.ant-typography,
+  .ant-typography h4 {
+    font-size: 20px;
+  }
+  .ant-btn {
+    font-size: 15px;
+  }
+}
+
+// Тач-устройства: iOS увеличивает страницу при фокусе на поле со шрифтом
+// меньше 16px.
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  .ant-input,
+  .ant-input-affix-wrapper,
+  .ant-select-selector,
+  .ant-select-selection-search-input {
+    font-size: 16px !important;
+  }
+}

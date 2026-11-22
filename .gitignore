@@ -1,0 +1,7 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Web build artefacts
+/web/node_modules/
+/web/dist/

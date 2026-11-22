@@ -1,0 +1,37 @@
+@use 'breakpoints' as bp;
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+
+  @include bp.mobile {
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+.text {
+  min-width: 0;
+}
+
+.title {
+  margin: 0 !important;
+}
+
+.subtitle {
+  display: block;
+  margin-top: 2px;
+}
+
+.extra {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+
+  @include bp.mobile {
+    width: 100%;
+  }
+}

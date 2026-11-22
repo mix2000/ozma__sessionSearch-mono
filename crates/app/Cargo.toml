@@ -1,0 +1,29 @@
+[package]
+name = "session-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "session-search"
+path = "src/main.rs"
+
+[dependencies]
+session-search-core = { path = "../core" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "original-uri"] }
+clap = { version = "4", features = ["derive", "env"] }
+mime_guess = "2"
+open = "5"
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tempfile.workspace = true

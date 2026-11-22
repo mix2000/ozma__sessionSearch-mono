@@ -1,0 +1,6 @@
+{"timestamp":"2026-09-14T00:05:07.000Z","type":"session_meta","payload":{"id":"01a09d3b-58db-7550-bf6b-93f273e29e1a","timestamp":"2026-09-14T00:05:07.000Z","cwd":"__WORKDIR__","source":"cli","git":{"branch":"dev"}}}
+{"timestamp":"2026-09-14T00:05:11.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>cwd nginx</environment_context>"}]}}
+{"timestamp":"2026-09-14T00:05:11.483Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"проверь сборку и nginx"}]}}
+{"timestamp":"2026-09-14T00:05:12.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"nginx reasoning"}]}}
+{"timestamp":"2026-09-14T00:05:13.000Z","type":"response_item","payload":{"type":"function_call_output","output":"nginx output"}}
+{"timestamp":"2026-09-14T00:05:20.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Сборка зелёная."}]}}

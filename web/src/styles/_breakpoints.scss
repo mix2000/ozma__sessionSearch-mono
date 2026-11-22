@@ -1,0 +1,8 @@
+// Брейкпоинты builder: узкая мобилка (телефон).
+$mobile-max: 575px;
+
+@mixin mobile {
+  @media (max-width: $mobile-max) {
+    @content;
+  }
+}

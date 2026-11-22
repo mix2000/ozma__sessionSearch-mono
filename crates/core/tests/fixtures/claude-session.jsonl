@@ -1,0 +1,8 @@
+{"type":"file-history-snapshot","messageId":"x"}
+{"type":"user","entrypoint":"cli","cwd":"__WORKDIR__","gitBranch":"master","sessionId":"11111111-2222-3333-4444-555555555555","timestamp":"2026-11-10T08:55:37.856Z","message":{"role":"user","content":"Почини ДЕПЛОЙ nginx<system-reminder>secret reminder</system-reminder>"}}
+{"type":"assistant","timestamp":"2026-11-10T08:55:40.000Z","message":{"content":[{"type":"thinking","thinking":"hidden thought"},{"type":"text","text":"Смотрю конфиг.\n\nНашёл ошибку в nginx config: ECONNREFUSED на upstream.\n\nИсправляю."},{"type":"tool_use","name":"Bash","input":{"command":"cat nginx.conf"}}]}}
+{"type":"user","timestamp":"2026-11-10T08:55:41.000Z","message":{"content":[{"type":"tool_result","content":"tool output nginx secret"}]}}
+{"type":"user","isSidechain":true,"timestamp":"2026-11-10T08:55:42.000Z","message":{"content":"sidechain nginx"}}
+{"type":"user","isCompactSummary":true,"timestamp":"2026-11-10T08:55:43.000Z","message":{"content":"This session is being continued nginx"}}
+{"type":"ai-title","aiTitle":"Починка деплоя"}
+{"type":"assistant","timestamp":"2026-11-10T08:56:00.000Z","message":{"content":[{"type":"text","text":"Готово, деплой работает."}]}}
