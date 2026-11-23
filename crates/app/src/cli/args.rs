@@ -67,7 +67,7 @@ pub struct ServeArgs {
     /// Port (the next free one is used if busy)
     #[arg(long, default_value_t = DEFAULT_PORT, env = "SESSION_SEARCH_PORT")]
     pub port: u16,
-    /// Address to bind. Anything but loopback exposes your transcripts to the network.
+    /// Address to bind. Anything but loopback exposes your transcripts to the network and requires --token.
     #[arg(long, default_value = "127.0.0.1")]
     pub host: IpAddr,
     /// Do not open the browser

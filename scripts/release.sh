@@ -21,9 +21,8 @@ if [[ $PUBLISH == 1 ]]; then
   if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     [[ "$(git rev-list -n1 "$TAG")" == "$(git rev-parse HEAD)" ]] ||
       { echo "Тег $TAG указывает не на HEAD" >&2; exit 1; }
-  else
-    git tag -a "$TAG" -m "$TAG"
   fi
+  COMMIT=$(git rev-parse HEAD)
 fi
 
 echo "== web"
@@ -48,6 +47,10 @@ tar -czf "dist/$BIN-macos-x64.tar.gz" -C target/x86_64-apple-darwin/release "$BI
 ls -la dist
 
 if [[ $PUBLISH == 1 ]]; then
+  # Тег — только после удачной сборки: упавшая не оставляет его на сломанном коммите.
+  [[ "$(git rev-parse HEAD)" == "$COMMIT" && -z "$(git status --porcelain)" ]] ||
+    { echo "Репозиторий изменился во время сборки — соберите заново" >&2; exit 1; }
+  git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git tag -a "$TAG" -m "$TAG" "$COMMIT"
   git push origin "$TAG"
   if gh release view "$TAG" >/dev/null 2>&1; then
     gh release upload "$TAG" dist/* --clobber

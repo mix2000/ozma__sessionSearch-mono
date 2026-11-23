@@ -34,17 +34,38 @@ fn bind(host: IpAddr, start: u16, skip: &[u16]) -> Result<TcpListener> {
     ))
 }
 
+/// The token to enforce: a blank one counts as none. Outside loopback there is
+/// no Host/Origin check, so the API (including resume) is never served without it.
+fn effective_token(host: IpAddr, token: Option<&str>) -> Result<Option<String>> {
+    let token = token.map(str::trim).filter(|t| !t.is_empty());
+    if token.is_none() && !host.is_loopback() {
+        anyhow::bail!(
+            "--host {host} exposes your transcripts to the network: set --token (or SESSION_SEARCH_TOKEN)"
+        );
+    }
+    Ok(token.map(str::to_owned))
+}
+
+/// The page to open; the UI takes the token from `?token=` and drops it from the address.
+fn browser_url(url: &str, token: Option<&str>) -> String {
+    match token {
+        Some(t) => {
+            let query: String = form_urlencoded::Serializer::new(String::new())
+                .append_pair("token", t)
+                .finish();
+            format!("{url}?{query}")
+        }
+        None => url.to_owned(),
+    }
+}
+
 pub fn run(engine: Engine, args: ServeArgs) -> Result<ExitCode> {
     let loopback = args.host.is_loopback();
+    let token = effective_token(args.host, args.token.as_deref())?;
     if !loopback {
         tracing::warn!(
-            "binding to {} — transcripts become reachable from the network{}",
-            args.host,
-            if args.token.is_some() {
-                ""
-            } else {
-                "; consider --token"
-            }
+            "binding to {} — transcripts become reachable from the network by anyone with the token",
+            args.host
         );
     }
     let listener = bind(args.host, args.port, &args.skip_ports)?;
@@ -56,10 +77,7 @@ pub fn run(engine: Engine, args: ServeArgs) -> Result<ExitCode> {
         addr.ip().to_string()
     };
     let url = format!("http://{shown_host}:{}/", addr.port());
-    let open_url = match &args.token {
-        Some(t) => format!("{url}?token={t}"),
-        None => url.clone(),
-    };
+    let open_url = browser_url(&url, token.as_deref());
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -67,7 +85,7 @@ pub fn run(engine: Engine, args: ServeArgs) -> Result<ExitCode> {
     let engine = Arc::new(engine);
     let state = AppState {
         engine: engine.clone(),
-        token: args.token.clone(),
+        token,
         loopback_only: loopback,
     };
     rt.block_on(async move {
@@ -116,6 +134,32 @@ mod tests {
         let ports: Vec<u16> = candidate_ports(37999, &[38000]).take(3).collect();
         assert_eq!(ports, [37999, 38001, 38002]);
         assert_eq!(candidate_ports(65500, &[]).last(), Some(65535));
+    }
+
+    #[test]
+    fn network_address_requires_a_token() {
+        let check = |host: &str, token| effective_token(host.parse().unwrap(), token);
+        for host in ["0.0.0.0", "::", "192.168.1.10", "::ffff:127.0.0.1"] {
+            for token in [None, Some(""), Some("  ")] {
+                let err = check(host, token).unwrap_err().to_string();
+                assert!(err.contains("--token"), "{host}: {err}");
+            }
+            assert_eq!(check(host, Some("t")).unwrap().as_deref(), Some("t"));
+        }
+        for host in ["127.0.0.1", "127.0.0.2", "::1"] {
+            assert_eq!(check(host, None).unwrap(), None);
+            assert_eq!(check(host, Some("")).unwrap(), None);
+            assert_eq!(check(host, Some(" t ")).unwrap().as_deref(), Some("t"));
+        }
+    }
+
+    #[test]
+    fn browser_url_encodes_the_token() {
+        assert_eq!(browser_url("http://h/", None), "http://h/");
+        assert_eq!(
+            browser_url("http://h/", Some("a+b&c#d")),
+            "http://h/?token=a%2Bb%26c%23d"
+        );
     }
 
     #[test]

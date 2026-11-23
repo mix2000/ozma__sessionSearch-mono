@@ -189,6 +189,21 @@ mod tests {
                 r#"/c start "" /D "C:\Users\me\my proj;x" cmd /k claude --resume 0a1b2c3d-1111-2222-3333-444455556666"#
             )
         );
+        // cmd.exe metacharacters stay inside the quotes, verbatim and unescaped.
+        let p = plans(
+            TargetOs::Windows,
+            MacTerminal::Terminal,
+            r"C:\a&b^c!d (x)|y",
+            &argv(),
+        )
+        .unwrap();
+        assert_eq!(p[0].args[1], r"C:\a&b^c!d (x)|y");
+        assert_eq!(
+            p[1].raw_args.as_deref(),
+            Some(
+                r#"/c start "" /D "C:\a&b^c!d (x)|y" cmd /k claude --resume 0a1b2c3d-1111-2222-3333-444455556666"#
+            )
+        );
         // '%' could expand variables in cmd.exe: only the wt plan remains.
         let p = plans(
             TargetOs::Windows,

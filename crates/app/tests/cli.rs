@@ -32,6 +32,7 @@ fn bin(root: &Path) -> Command {
         "SESSION_SEARCH_PORT",
         "SESSION_SEARCH_TOKEN",
         "SESSION_SEARCH_TERMINAL",
+        "SESSION_SEARCH_SKIP_PORTS",
         "RUST_LOG",
     ] {
         cmd.env_remove(var);
@@ -166,4 +167,22 @@ fn open_failure_exits_with_code_1() {
         .clone();
     let text = String::from_utf8(err).unwrap();
     assert!(text.starts_with("Error: open index"), "{text}");
+}
+
+#[test]
+fn serve_refuses_a_network_address_without_a_token() {
+    let tmp = indexed();
+    for extra in [&[][..], &["--token", ""][..]] {
+        let err = bin(tmp.path())
+            .args(["serve", "--no-open", "--host", "0.0.0.0"])
+            .args(extra)
+            .timeout(std::time::Duration::from_secs(20))
+            .assert()
+            .code(1)
+            .get_output()
+            .stderr
+            .clone();
+        let text = String::from_utf8(err).unwrap();
+        assert!(text.contains("set --token"), "{text}");
+    }
 }

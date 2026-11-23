@@ -36,8 +36,19 @@ pub fn has_control(s: &str) -> bool {
     s.chars().any(char::is_control)
 }
 
-/// The command a user can paste into their own terminal.
+/// Whether `workdir` can be put into a pasted command without breaking out of
+/// its quotes: no control characters (they act even inside quotes when pasted),
+/// and no `"` on Windows, where it cannot be escaped (nor occur in a real path).
+fn quotable(os: TargetOs, workdir: &str) -> bool {
+    !has_control(workdir) && !(os == TargetOs::Windows && workdir.contains('"'))
+}
+
+/// The command a user can paste into their own terminal; without the `cd` part
+/// when the folder cannot be quoted safely.
 pub fn copy_command(os: TargetOs, workdir: &str, argv: &[String]) -> String {
+    if !quotable(os, workdir) {
+        return argv.join(" ");
+    }
     match os {
         TargetOs::Windows => format!("cd /d \"{workdir}\" && {}", argv.join(" ")),
         _ => format!(
@@ -79,6 +90,18 @@ mod tests {
             copy_command(TargetOs::Windows, r"C:\w", &argv()),
             r#"cd /d "C:\w" && claude --resume 0a1b2c3d-1111-2222-3333-444455556666"#
         );
+    }
+
+    #[test]
+    fn copy_command_drops_a_folder_that_cannot_be_quoted() {
+        let plain = argv().join(" ");
+        for os in [TargetOs::Mac, TargetOs::Linux, TargetOs::Windows] {
+            assert_eq!(copy_command(os, "/a\n/b", &argv()), plain);
+            assert_eq!(copy_command(os, "/a\u{1b}[201~b", &argv()), plain);
+        }
+        let breakout = r#"C:\w" & calc & ""#;
+        assert_eq!(copy_command(TargetOs::Windows, breakout, &argv()), plain);
+        assert!(copy_command(TargetOs::Mac, "/a \"b\"", &argv()).starts_with("cd '/a \"b\"' && "));
     }
 
     #[test]
