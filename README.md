@@ -68,7 +68,10 @@ Claude сам удаляет старые транскрипты (через 30 
 есть и в индексе.
 
 - Сервер слушает только `127.0.0.1`. `--host` для другого адреса открывает
-  разговоры сети; без `--token` программа с таким адресом не запустится.
+  разговоры сети; без `--token` программа с таким адресом не запустится
+  (с версии 0.2.1). Токен нужен длинный случайный (`openssl rand -hex 32`), и
+  трафик идёт по HTTP без шифрования — надёжнее оставить `127.0.0.1` и
+  подключаться через `ssh -L 4477:127.0.0.1:4477`.
 - `--token` / `SESSION_SEARCH_TOKEN`: API требует `Authorization: Bearer` или
   `?token=` (интерфейс запомнит токен из ссылки).
 - Запросы с чужим `Host` отклоняются (защита от DNS rebinding), CORS нет.
@@ -143,6 +146,9 @@ CI (`.github/workflows/check.yml`) — те же шаги на macOS и Windows,
 scripts/release.sh             # собрать в dist/
 scripts/release.sh --publish   # + тег v<версия из Cargo.toml> и загрузка в GitHub Release
 ```
+
+`--publish` требует зелёный CI на текущем коммите и не перезаписывает уже
+выпущенную версию.
 
 Нужны: `rustup target add aarch64-apple-darwin x86_64-apple-darwin
 x86_64-pc-windows-msvc`, `cargo install cargo-xwin`, `brew install llvm lld`, `gh`.

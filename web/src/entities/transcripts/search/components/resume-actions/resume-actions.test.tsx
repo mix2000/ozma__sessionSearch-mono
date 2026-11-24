@@ -60,6 +60,23 @@ describe('ResumeActions', () => {
     expect(screen.getByText('cd /w && grok -s x')).toBeInTheDocument();
   });
 
+  it('команда без cd — подсказка про папку', () => {
+    const hint = 'Выполните команду в папке разговора';
+    const plain = { workdir: 'C:\\100%', resumeCommand: 'claude --resume aaaa-1111' };
+    const { unmount } = renderWithProviders(<ResumeActions result={makeResult(plain)} />);
+    expect(screen.getByText(hint)).toBeInTheDocument();
+    unmount();
+    for (const other of [
+      { resumeCommand: COMMAND },
+      { ...plain, workdir: null },
+      { workdir: 'C:\\100%' },
+    ]) {
+      const view = renderWithProviders(<ResumeActions result={makeResult(other)} />);
+      expect(screen.queryByText(hint)).toBeNull();
+      view.unmount();
+    }
+  });
+
   it('без команды от бэкенда — блока команды нет', () => {
     const { container } = renderWithProviders(<ResumeActions result={makeResult()} />);
     expect(container.querySelector('code')).toBeNull();

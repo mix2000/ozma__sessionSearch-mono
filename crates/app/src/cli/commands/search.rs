@@ -91,7 +91,12 @@ fn print_results(res: &SearchResponse) {
             println!("  … {} more", r.matches - r.hits.len());
         }
         if let Some(cmd) = &r.resume_command {
-            println!("  resume: {cmd}");
+            let hint = if r.workdir.is_some() && !cmd.starts_with("cd ") {
+                "  (run it in the folder above)"
+            } else {
+                ""
+            };
+            println!("  resume: {cmd}{hint}");
         }
     }
     if res.truncated {

@@ -47,6 +47,9 @@ function MainAction({ result }: IResumeActionsProps) {
 
 /** «Продолжить» в новом окне терминала и команда для своего терминала (от бэкенда). */
 export function ResumeActions({ result }: IResumeActionsProps) {
+  // Бэкенд не вставляет `cd`, если путь нельзя безопасно закавычить.
+  const withoutFolder =
+    !!result.workdir && !!result.resumeCommand && !result.resumeCommand.startsWith('cd ');
   return (
     <div className={styles.actions}>
       <MainAction result={result} />
@@ -57,6 +60,7 @@ export function ResumeActions({ result }: IResumeActionsProps) {
           </Typography.Text>
         </Tooltip>
       )}
+      {withoutFolder && <Typography.Text type="secondary">{T.runInFolder}</Typography.Text>}
     </div>
   );
 }

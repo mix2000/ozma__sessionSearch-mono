@@ -38,10 +38,16 @@ pub fn has_control(s: &str) -> bool {
 
 /// Whether `workdir` can be put into a pasted command without breaking out of
 /// its quotes: no control characters (they act even inside quotes when pasted),
-/// and no `"` on Windows, where it cannot be escaped (nor occur in a real path).
+/// and on Windows nothing that is active inside double quotes.
 fn quotable(os: TargetOs, workdir: &str) -> bool {
-    !has_control(workdir) && !(os == TargetOs::Windows && workdir.contains('"'))
+    !has_control(workdir)
+        && !(os == TargetOs::Windows && workdir.contains(ACTIVE_IN_WINDOWS_QUOTES))
 }
+
+/// cmd expands `%…%` (which can yield a quote); PowerShell runs `$(…)`, escapes
+/// with a backtick and takes typographic double quotes for `"`.
+const ACTIVE_IN_WINDOWS_QUOTES: [char; 7] =
+    ['"', '%', '$', '`', '\u{201c}', '\u{201d}', '\u{201e}'];
 
 /// The command a user can paste into their own terminal; without the `cd` part
 /// when the folder cannot be quoted safely.
@@ -99,8 +105,24 @@ mod tests {
             assert_eq!(copy_command(os, "/a\n/b", &argv()), plain);
             assert_eq!(copy_command(os, "/a\u{1b}[201~b", &argv()), plain);
         }
-        let breakout = r#"C:\w" & calc & ""#;
-        assert_eq!(copy_command(TargetOs::Windows, breakout, &argv()), plain);
+        for breakout in [
+            r#"C:\w" & calc & ""#,
+            r"C:\%CMDCMDLINE:~0,1% & calc",
+            r"C:\$(calc)",
+            r"C:\w`",
+            "C:\\w\u{201d}; calc; \u{201c}",
+            "C:\\w\u{201e}; calc",
+        ] {
+            assert_eq!(copy_command(TargetOs::Windows, breakout, &argv()), plain);
+        }
+        // Inert inside double quotes: the folder stays.
+        let inert = r"C:\Мои проекты\a&b^c!d (x)'";
+        assert!(copy_command(TargetOs::Windows, inert, &argv())
+            .starts_with(&format!("cd /d \"{inert}\" && ")));
+        // Single quotes keep all of it literal elsewhere.
+        assert!(
+            copy_command(TargetOs::Linux, "/a%b$(c)`", &argv()).starts_with("cd '/a%b$(c)`' && ")
+        );
         assert!(copy_command(TargetOs::Mac, "/a \"b\"", &argv()).starts_with("cd '/a \"b\"' && "));
     }
 

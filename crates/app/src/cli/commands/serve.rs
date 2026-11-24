@@ -1,6 +1,6 @@
 //! `session-search serve` (default): web UI + API with background indexing.
 
-use std::net::{IpAddr, SocketAddr, TcpListener};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,6 +46,22 @@ fn effective_token(host: IpAddr, token: Option<&str>) -> Result<Option<String>> 
     Ok(token.map(str::to_owned))
 }
 
+/// Shorter than any sensible random token (16 hex characters are 64 bits).
+fn is_short(token: &str) -> bool {
+    token.chars().count() < 16
+}
+
+/// Where this machine can open the page: the bound address, or loopback of the
+/// same family when bound to all interfaces (`0.0.0.0` / `::` is not a destination).
+fn page_url(addr: SocketAddr) -> String {
+    let ip = match addr.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => Ipv4Addr::LOCALHOST.into(),
+        IpAddr::V6(ip) if ip.is_unspecified() => Ipv6Addr::LOCALHOST.into(),
+        ip => ip,
+    };
+    format!("http://{}/", SocketAddr::new(ip, addr.port()))
+}
+
 /// The page to open; the UI takes the token from `?token=` and drops it from the address.
 fn browser_url(url: &str, token: Option<&str>) -> String {
     match token {
@@ -67,16 +83,14 @@ pub fn run(engine: Engine, args: ServeArgs) -> Result<ExitCode> {
             "binding to {} — transcripts become reachable from the network by anyone with the token",
             args.host
         );
+        if token.as_deref().is_some_and(is_short) {
+            tracing::warn!("the token is short and can be guessed: use a long random one");
+        }
     }
     let listener = bind(args.host, args.port, &args.skip_ports)?;
     listener.set_nonblocking(true)?;
     let addr = listener.local_addr()?;
-    let shown_host = if loopback {
-        "127.0.0.1".to_owned()
-    } else {
-        addr.ip().to_string()
-    };
-    let url = format!("http://{shown_host}:{}/", addr.port());
+    let url = page_url(addr);
     let open_url = browser_url(&url, token.as_deref());
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -151,6 +165,27 @@ mod tests {
             assert_eq!(check(host, Some("")).unwrap(), None);
             assert_eq!(check(host, Some(" t ")).unwrap().as_deref(), Some("t"));
         }
+    }
+
+    #[test]
+    fn page_url_is_the_address_that_listens() {
+        for (addr, url) in [
+            ("127.0.0.1:4477", "http://127.0.0.1:4477/"),
+            ("127.0.0.2:4477", "http://127.0.0.2:4477/"),
+            ("[::1]:4477", "http://[::1]:4477/"),
+            ("[2001:db8::5]:4477", "http://[2001:db8::5]:4477/"),
+            ("192.168.1.10:4477", "http://192.168.1.10:4477/"),
+            ("0.0.0.0:4477", "http://127.0.0.1:4477/"),
+            ("[::]:4477", "http://[::1]:4477/"),
+        ] {
+            assert_eq!(page_url(addr.parse().unwrap()), url);
+        }
+    }
+
+    #[test]
+    fn short_tokens() {
+        assert!(is_short("t") && is_short("123456789012345"));
+        assert!(!is_short("1234567890123456"));
     }
 
     #[test]

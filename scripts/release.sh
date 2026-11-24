@@ -2,6 +2,7 @@
 # Local release build: macOS arm64 + x64, Windows x64 (cargo-xwin).
 #   scripts/release.sh             — build into dist/
 #   scripts/release.sh --publish   — build and upload to GitHub release v<version>
+#                                    (HEAD must be green in CI; a release is never overwritten)
 # Needs: rustup targets aarch64/x86_64-apple-darwin, x86_64-pc-windows-msvc;
 #        cargo-xwin, brew llvm + lld (clang-cl, lld-link), gh.
 set -euo pipefail
@@ -23,15 +24,20 @@ if [[ $PUBLISH == 1 ]]; then
       { echo "Тег $TAG указывает не на HEAD" >&2; exit 1; }
   fi
   COMMIT=$(git rev-parse HEAD)
+  if gh release view "$TAG" >/dev/null 2>&1; then
+    echo "Релиз $TAG уже есть — поднимите версию" >&2; exit 1
+  fi
+  # CI проверяет то, чего здесь нет: Windows и e2e.
+  CI=$(gh run list --workflow check.yml --commit "$COMMIT" --limit 1 --json conclusion -q '.[0].conclusion // ""')
+  [[ "$CI" == success ]] ||
+    { echo "CI на $COMMIT не зелёный (${CI:-нет завершённого прогона}) — запушьте и дождитесь" >&2; exit 1; }
 fi
 
 echo "== web"
 (cd web && npm ci --silent && npm run build)
 
 echo "== checks"
-cargo fmt --all --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked -q
+bash scripts/check.sh
 
 rm -rf dist && mkdir dist
 for t in aarch64-apple-darwin x86_64-apple-darwin; do
@@ -52,9 +58,5 @@ if [[ $PUBLISH == 1 ]]; then
     { echo "Репозиторий изменился во время сборки — соберите заново" >&2; exit 1; }
   git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git tag -a "$TAG" -m "$TAG" "$COMMIT"
   git push origin "$TAG"
-  if gh release view "$TAG" >/dev/null 2>&1; then
-    gh release upload "$TAG" dist/* --clobber
-  else
-    gh release create "$TAG" dist/* --title "$TAG" --generate-notes
-  fi
+  gh release create "$TAG" dist/* --title "$TAG" --generate-notes
 fi

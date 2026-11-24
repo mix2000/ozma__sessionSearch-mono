@@ -5,4 +5,5 @@ export const RESUME_ACTIONS_TEXTS = {
   resumeFailed: 'Не удалось продолжить',
   noFolder: 'Папки разговора уже нет — продолжить нельзя',
   copyCommand: 'Команда для своего терминала',
+  runInFolder: 'Выполните команду в папке разговора',
 };

@@ -1,6 +1,8 @@
 //! Request guard: Host/Origin checks for every request (DNS rebinding, CSRF),
 //! no cross-site writes, and the optional bearer token for `/api`.
 
+use std::net::Ipv4Addr;
+
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, Method};
 use axum::middleware::Next;
@@ -23,10 +25,9 @@ fn is_loopback_host(host: &str) -> bool {
     } else {
         host.rsplit_once(':').map_or(host, |(h, _)| h).to_owned()
     };
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "localhost" | "127.0.0.1" | "[::1]"
-    )
+    // Any 127.0.0.0/8 literal: the server can be bound to each of them.
+    matches!(name.to_ascii_lowercase().as_str(), "localhost" | "[::1]")
+        || name.parse::<Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 fn origin_host(origin: &str) -> Option<&str> {
@@ -102,6 +103,7 @@ mod tests {
             "localhost",
             "localhost:4477",
             "127.0.0.1:1",
+            "127.0.0.2:4477",
             "[::1]:4477",
             "[::1]",
             "LOCALHOST",
@@ -112,6 +114,8 @@ mod tests {
             "",
             "evil.com",
             "127.0.0.1.evil.com",
+            "127.evil.com",
+            "128.0.0.1",
             "localhost.evil.com:80",
             "[::1]x",
             "10.0.0.1:4477",
