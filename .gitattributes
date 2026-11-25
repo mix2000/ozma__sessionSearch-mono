@@ -1,0 +1,2 @@
+# Везде LF: на Windows git иначе выписывает CRLF, и prettier бракует все файлы.
+* text=auto eol=lf
