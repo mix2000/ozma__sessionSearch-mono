@@ -16,11 +16,16 @@ git_t() { git -C "$TMP/repo" -c user.name=t -c user.email=t@example.com -c core.
 git_t add -A
 git_t commit -qm init
 
-# FAKE_DRAFT: "" — релиза нет, true — черновик, false — выпущен. FAKE_CI — итог прогона.
+# FAKE_DRAFT: "" — релиза нет, true — черновик, false — выпущен, error — сбой gh. FAKE_CI — итог прогона.
 cat >"$TMP/bin/gh" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
-  "release view") [ -n "$FAKE_DRAFT" ] || exit 1; echo "$FAKE_DRAFT" ;;
+  "release view")
+    case "$FAKE_DRAFT" in
+      "") echo "release not found" >&2; exit 1 ;;
+      error) echo "HTTP 401: Bad credentials" >&2; exit 1 ;;
+      *) echo "$FAKE_DRAFT" ;;
+    esac ;;
   "run list") echo "$FAKE_CI" ;;
   *) echo "неожиданный вызов gh $*" >&2; exit 99 ;;
 esac
@@ -44,6 +49,7 @@ expect() {
 
 expect "выпущенная версия" "поднимите версию" false success
 expect "черновик" "Остался черновик" true success
+expect "сбой gh" "Не удалось узнать, есть ли релиз" error success
 expect "CI не было" "не зелёный (нет завершённого прогона)" "" ""
 expect "CI красный" "не зелёный (failure)" "" failure
 expect "CI зелёный, сборка упала" "BUILD-STARTED" "" success

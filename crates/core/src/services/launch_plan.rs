@@ -10,7 +10,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use super::command::{applescript_str, copy_command, has_control, safe_token};
+use super::command::{applescript_str, has_control, is_unc, posix_command, safe_token};
 use crate::models::{LaunchPlan, MacTerminal, TargetOs};
 use crate::platform::TerminalSpawner;
 
@@ -36,7 +36,7 @@ pub fn plans(
 
 /// `osascript` driving Terminal.app or iTerm.
 fn mac_plan(mac_terminal: MacTerminal, workdir: &str, argv: &[String]) -> LaunchPlan {
-    let cmd = applescript_str(&copy_command(TargetOs::Mac, workdir, argv));
+    let cmd = applescript_str(&posix_command(workdir, argv));
     let script: Vec<String> = match mac_terminal {
         MacTerminal::Terminal => vec![
             "tell application \"Terminal\"".into(),
@@ -64,6 +64,10 @@ fn windows_plans(workdir: &str, argv: &[String]) -> Result<Vec<LaunchPlan>> {
     if workdir.contains('"') {
         return Err(anyhow!("unsupported characters in the folder path"));
     }
+    // cmd would silently start in the Windows folder instead.
+    if is_unc(workdir) {
+        return Err(anyhow!("cmd cannot run in a network folder"));
+    }
     let mut out = Vec::new();
     // Windows Terminal splits its command line on ';' unless escaped.
     let wt_dir = workdir.replace(';', "\\;");
@@ -85,10 +89,7 @@ fn windows_plans(workdir: &str, argv: &[String]) -> Result<Vec<LaunchPlan>> {
 
 /// Common Linux terminal emulators, each running the command then a shell.
 fn linux_plans(workdir: &str, argv: &[String]) -> Vec<LaunchPlan> {
-    let inner = format!(
-        "{}; exec \"${{SHELL:-sh}}\"",
-        copy_command(TargetOs::Linux, workdir, argv)
-    );
+    let inner = format!("{}; exec \"${{SHELL:-sh}}\"", posix_command(workdir, argv));
     let sh = |prefix: &[&str]| {
         let mut a: Vec<String> = prefix.iter().map(|s| s.to_string()).collect();
         a.extend(["sh".into(), "-c".into(), inner.clone()]);
@@ -220,6 +221,8 @@ mod tests {
             &argv()
         )
         .is_err());
+        let unc = r"\\server\share";
+        assert!(plans(TargetOs::Windows, MacTerminal::Terminal, unc, &argv()).is_err());
     }
 
     #[test]
@@ -234,6 +237,15 @@ mod tests {
         assert_eq!(p[0].program, "x-terminal-emulator");
         assert_eq!(p[0].args[..3], ["-e", "sh", "-c"]);
         assert!(p[0].args[3].starts_with(r"cd '/home/me/it'\''s' && claude --resume"));
+        // Not pasted, so a folder the copied command leaves out still opens.
+        let odd = "/w/\u{202e}x";
+        for os in [TargetOs::Linux, TargetOs::Mac] {
+            let p = plans(os, MacTerminal::Terminal, odd, &argv()).unwrap();
+            assert!(p[0]
+                .args
+                .iter()
+                .any(|a| a.contains(&format!("cd '{odd}' && "))));
+        }
     }
 
     #[test]

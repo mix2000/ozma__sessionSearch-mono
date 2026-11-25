@@ -39,13 +39,15 @@ const sessions = [
     id: 'grok-3c4d5e6f-3333-4abc-9def-cccccccccccc',
     provider: 'grok',
     title: 'Переписать конфиг nginx на шаблоны',
-    workdir: '/home/demo/sandbox/landing',
+    workdir: 'C:\\Users\\demo\\sandbox\\100% landing',
     kind: 'interactive',
     gitBranch: null,
     startedAt: ago(9000),
     lastAt: ago(8800),
     workdirExists: true,
-    resumeCommand: 'cd "/home/demo/sandbox/landing" && grok --resume grok-3c4d5e6f',
+    // Папку с % бэкенд в команду не включает.
+    resumeCommand: 'grok --resume grok-3c4d5e6f-3333-4abc-9def-cccccccccccc',
+    resumeNeedsFolder: true,
   },
   {
     id: '0c7a8b9d-4444-4e5f-8a6b-dddddddddddd',
@@ -85,6 +87,7 @@ function search(q, provider, headless) {
     .map(s => {
       const msgs = messagesFor(s).filter(m => low.every(t => m.text.toLowerCase().includes(t)));
       return {
+        resumeNeedsFolder: false,
         ...s,
         messageCount: 12,
         matches: msgs.length,

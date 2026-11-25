@@ -57,6 +57,8 @@ test('продолжить, ошибка продолжения, обновит�
   await grok.getByRole('button', { name: /Продолжить/ }).click();
   await expect(page.getByText('Открыто в терминале')).toBeVisible();
   await expect(grok.locator('code')).toContainText('grok --resume');
+  await expect(grok.getByText('Выполните команду в папке разговора')).toBeVisible();
+  await expect(page.getByText('Выполните команду в папке разговора')).toHaveCount(1);
 
   const codex = page.locator('.ant-card', { hasText: 'Почему nginx отдаёт 502' });
   await codex.getByRole('button', { name: /Продолжить/ }).click();

@@ -25,6 +25,7 @@ jobs:
 
       - name: Web UI
         working-directory: web
+        shell: bash
         run: |
           npm ci
           npm run build

@@ -24,7 +24,12 @@ if [[ $PUBLISH == 1 ]]; then
       { echo "Тег $TAG указывает не на HEAD" >&2; exit 1; }
   fi
   COMMIT=$(git rev-parse HEAD)
-  DRAFT=$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || true)
+  # «Релиза нет» — только этот ответ gh; сбой сети или входа — не разрешение выпускать.
+  if ! DRAFT=$(gh release view "$TAG" --json isDraft -q .isDraft 2>&1); then
+    [[ "$DRAFT" == *"release not found"* ]] ||
+      { echo "Не удалось узнать, есть ли релиз $TAG: $DRAFT" >&2; exit 1; }
+    DRAFT=""
+  fi
   case "$DRAFT" in
     "") ;;
     true)

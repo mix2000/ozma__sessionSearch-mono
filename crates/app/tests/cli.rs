@@ -231,6 +231,28 @@ fn folder_hint_for_a_command_without_cd() {
     );
 }
 
+/// A folder cmd cannot change to, though Windows itself opens it.
+#[cfg(windows)]
+#[test]
+fn folder_hint_for_a_path_cmd_does_not_accept() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = std::fs::canonicalize(dir.path()).unwrap();
+    let cwd = cwd.to_string_lossy();
+    assert!(cwd.starts_with(r"\\?\"), "{cwd}");
+    let cd = std::process::Command::new("cmd")
+        .args(["/d", "/c", &format!("cd /d {cwd}&& exit 0 || exit 1")])
+        .status();
+    assert!(!cd.unwrap().success());
+    let tmp = indexed_in(&cwd);
+    let text = stdout(bin(tmp.path()).args(["search", "nginx"]));
+    assert!(
+        text.contains(&format!(
+            "resume: claude --resume {ID}  (run it in the folder above)\n"
+        )),
+        "{text}"
+    );
+}
+
 /// Writes a fake `claude` that leaves `ran.txt` with its arguments in the
 /// current folder, and returns the folder to put on `PATH`.
 fn fake_claude(dir: &Path) -> PathBuf {
@@ -286,7 +308,7 @@ fn run_in_shell(shell: &str, dir: &Path, command: &str) -> Option<std::process::
 #[test]
 fn copied_command_works_in_real_shells() {
     let dir = tempfile::tempdir().unwrap();
-    let cwd = dir.path().join("my dir (x)' a;b,c=d");
+    let cwd = dir.path().join("my R&D ^dir (x)' a;b,c=d");
     std::fs::create_dir(&cwd).unwrap();
     fake_claude(dir.path());
     let tmp = indexed_in(&cwd.to_string_lossy());

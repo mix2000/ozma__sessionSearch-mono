@@ -3,14 +3,14 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
-use session_search_core::{Engine, SearchParams, SearchResponse};
+use session_search_core::{unprintable, Engine, SearchParams, SearchResponse};
 
 use crate::cli::args::SearchArgs;
 
-/// Text from a transcript, safe for a terminal: control characters (escape
-/// sequences included) become `�`.
+/// Text from a transcript, safe for a terminal: control (escape sequences
+/// included) and bidirectional characters become `�`.
 fn printable(s: &str) -> String {
-    s.replace(char::is_control, "\u{fffd}")
+    s.replace(unprintable, "\u{fffd}")
 }
 
 /// Whitespace collapsed to single spaces, clipped to `max` chars with `…`.
@@ -121,6 +121,7 @@ mod tests {
         assert_eq!(one_line(" a\n\tb  c ", 10), "a b c");
         assert_eq!(one_line("абвгд", 3), "абв…");
         assert_eq!(one_line("a\u{1b}[31m\tb", 10), "a\u{fffd}[31m b");
+        assert_eq!(printable("a\u{202e}b\u{2066}"), "a\u{fffd}b\u{fffd}");
         assert_eq!(printable("/a\n\u{9b}b c"), "/a\u{fffd}\u{fffd}b c");
     }
 

@@ -5,7 +5,7 @@ use crate::error::{Error, Result};
 use crate::models::messages;
 use crate::models::{Provider, TargetOs};
 use crate::services::agents::resume_argv;
-use crate::services::command::{copy_command, quotable};
+use crate::services::command::{can_cd, copy_command};
 use crate::storage::sessions::SessionRow;
 
 /// `cd <workdir> && <agent resume command>` for `os` (just the agent command
@@ -21,7 +21,7 @@ pub fn command(s: &SessionRow, os: TargetOs) -> Option<String> {
 
 /// Whether [`command`] had to leave the known folder out: run it there.
 pub fn needs_folder(s: &SessionRow, os: TargetOs) -> bool {
-    s.workdir.as_deref().is_some_and(|w| !quotable(os, w))
+    s.workdir.as_deref().is_some_and(|w| !can_cd(os, w))
 }
 
 /// What to run and where.
@@ -196,5 +196,9 @@ mod tests {
         assert!(needs_folder(&s, TargetOs::Windows));
         assert!(!needs_folder(&s, TargetOs::Mac));
         assert!(!needs_folder(&session("claude", None), TargetOs::Windows));
+        let net = session("claude", Some(r"\\server\share"));
+        assert!(needs_folder(&net, TargetOs::Windows));
+        let amp = session("claude", Some(r"C:\R&D"));
+        assert!(!needs_folder(&amp, TargetOs::Windows));
     }
 }

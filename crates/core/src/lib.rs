@@ -23,3 +23,4 @@ pub use models::{
 };
 pub use platform::paths::default_data_dir;
 pub use services::agents::dedup_providers;
+pub use services::command::unprintable;
