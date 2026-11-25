@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "session-search"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1054,7 +1054,7 @@ dependencies = [
 
 [[package]]
 name = "session-search-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "chrono",
