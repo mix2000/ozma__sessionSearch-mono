@@ -289,7 +289,7 @@ fn resume_launches_the_agent_in_its_workdir() {
     let (f, e) = synced();
     let ok = e.resume(CODEX_ID).unwrap();
     assert!(ok.ok);
-    assert!(ok.command.ends_with(&format!("codex resume {CODEX_ID}")));
+    assert!(ok.command.contains(&format!("codex resume {CODEX_ID}")));
     let launched = f.launched.lock().unwrap().clone();
     assert_eq!(launched.len(), 1);
     assert_eq!(launched[0].0, f.workdir);

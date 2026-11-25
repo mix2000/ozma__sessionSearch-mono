@@ -59,7 +59,7 @@ Claude сам удаляет старые транскрипты (через 30 
   реплики вокруг.
 - «Продолжить» открывает разговор в новом окне терминала (Terminal или iTerm
   на macOS, Windows Terminal или cmd на Windows). Рядом — команда, чтобы
-  продолжить в своём терминале. Уже открытый разговор отмечен «открыт в
+  продолжить в своём терминале (на Windows — для cmd и PowerShell). Уже открытый разговор отмечен «открыт в
   терминале (pid …)».
 
 ## Безопасность
@@ -114,7 +114,7 @@ cd web && npm run mock                        # мок API без бэкенда
 
 | Команда | Что делает |
 |---|---|
-| `make check` / `npm run check` | всё, что проверяет CI, кроме e2e: prettier, eslint, tsc, vitest с порогами покрытия, `cargo fmt`, `clippy -D warnings`, `cargo test`, сторожа |
+| `make check` / `npm run check` | всё, что проверяет CI, кроме e2e: prettier, eslint, tsc, vitest с порогами покрытия, `cargo fmt`, `clippy -D warnings`, `cargo test`, сторожа, условия `release.sh` |
 | `make test` / `npm test` | юнит- и интеграционные тесты web и Rust |
 | `make e2e` / `npm run test:e2e` | Playwright на моке API: сам поднимает мок (4597) и vite (5197) и гасит их; порты — `E2E_MOCK_PORT`, `E2E_WEB_PORT` |
 | `make guards` / `npm run guards` | сторожа `@guard`: web — файл ≤ 500 строк, нет `export *`, сеть только в `common/services/api`, кириллица только в `*.consts.ts`, нет глубоких импортов между сущностями, нет inline-`style`; Rust (`crates/core/tests/guards.rs`) — файл ≤ 500 строк, `cfg(target_os/unix/windows)` только в `platform/`, слои (`models` без I/O и часов, `services` без прямого I/O и конкретных платформ, `platform`/`storage` без `services`) |
@@ -136,7 +136,7 @@ Git-хуки (husky, ставятся `npm install` в корне; сеть не
 - **pre-push** — по затронутой части: web `lint` + `typecheck` + `test`,
   Rust `clippy -D warnings` + `cargo test` (всё с `--locked`), затем сторожа. Обойти: `git push --no-verify`.
 
-CI (`.github/workflows/check.yml`) — те же шаги на macOS и Windows, e2e — на macOS.
+CI (`.github/workflows/check.yml`) — `scripts/check.sh` на macOS и Windows, e2e — на macOS.
 
 ## Релиз
 

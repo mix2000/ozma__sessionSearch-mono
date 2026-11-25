@@ -27,10 +27,6 @@ jobs:
         working-directory: web
         run: |
           npm ci
-          npm run format:check
-          npm run lint
-          npm run typecheck
-          npm run test:coverage
           npm run build
 
       - uses: dtolnay/rust-toolchain@stable
@@ -39,15 +35,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Rust
-        run: |
-          cargo fmt --all --check
-          cargo clippy --all-targets --locked -- -D warnings
-          cargo test --locked
-
-      - name: Guards
+      - name: Checks
         shell: bash
-        run: bash scripts/guards.sh
+        run: bash scripts/check.sh
 
       - name: e2e (Playwright on the mock API)
         if: matrix.os == 'macos-latest'

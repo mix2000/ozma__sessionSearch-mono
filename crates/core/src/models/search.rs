@@ -60,6 +60,8 @@ pub struct TranscriptResult {
     /// Command to continue the conversation in one's own terminal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_command: Option<String>,
+    /// The command leaves out the (existing) folder: it must be run there.
+    pub resume_needs_folder: bool,
     pub matches: usize,
     pub hits: Vec<TranscriptHit>,
 }

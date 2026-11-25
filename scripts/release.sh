@@ -24,9 +24,14 @@ if [[ $PUBLISH == 1 ]]; then
       { echo "Тег $TAG указывает не на HEAD" >&2; exit 1; }
   fi
   COMMIT=$(git rev-parse HEAD)
-  if gh release view "$TAG" >/dev/null 2>&1; then
-    echo "Релиз $TAG уже есть — поднимите версию" >&2; exit 1
-  fi
+  DRAFT=$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || true)
+  case "$DRAFT" in
+    "") ;;
+    true)
+      echo "Остался черновик $TAG от прерванной загрузки — удалите его (gh release delete $TAG) и повторите" >&2
+      exit 1 ;;
+    *) echo "Релиз $TAG уже есть — поднимите версию" >&2; exit 1 ;;
+  esac
   # CI проверяет то, чего здесь нет: Windows и e2e.
   CI=$(gh run list --workflow check.yml --commit "$COMMIT" --limit 1 --json conclusion -q '.[0].conclusion // ""')
   [[ "$CI" == success ]] ||

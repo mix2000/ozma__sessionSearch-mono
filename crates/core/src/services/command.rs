@@ -38,25 +38,29 @@ pub fn has_control(s: &str) -> bool {
 
 /// Whether `workdir` can be put into a pasted command without breaking out of
 /// its quotes: no control characters (they act even inside quotes when pasted),
-/// and on Windows nothing that is active inside double quotes.
-fn quotable(os: TargetOs, workdir: &str) -> bool {
-    !has_control(workdir)
-        && !(os == TargetOs::Windows && workdir.contains(ACTIVE_IN_WINDOWS_QUOTES))
+/// and on Windows nothing from [`ACTIVE_ON_WINDOWS`].
+pub fn quotable(os: TargetOs, workdir: &str) -> bool {
+    !has_control(workdir) && !(os == TargetOs::Windows && workdir.contains(ACTIVE_ON_WINDOWS))
 }
 
-/// cmd expands `%…%` (which can yield a quote); PowerShell runs `$(…)`, escapes
-/// with a backtick and takes typographic double quotes for `"`.
-const ACTIVE_IN_WINDOWS_QUOTES: [char; 7] =
-    ['"', '%', '$', '`', '\u{201c}', '\u{201d}', '\u{201e}'];
+/// Inside double quotes cmd expands `%…%` (which can yield a quote), PowerShell
+/// runs `$(…)`, escapes with a backtick and takes typographic double quotes for
+/// `"`. The command inside `cmd /c "…"` sees the folder without quotes of its
+/// own, so cmd's operators count too.
+const ACTIVE_ON_WINDOWS: [char; 12] = [
+    '"', '%', '$', '`', '\u{201c}', '\u{201d}', '\u{201e}', '&', '|', '<', '>', '^',
+];
 
 /// The command a user can paste into their own terminal; without the `cd` part
-/// when the folder cannot be quoted safely.
+/// when the folder cannot be quoted safely. On Windows it has to mean the same
+/// in cmd and in PowerShell (5.1 has no `&&`, none has `cd /d`), hence `cmd /c`;
+/// no space before `&&`, or it would become part of the folder.
 pub fn copy_command(os: TargetOs, workdir: &str, argv: &[String]) -> String {
     if !quotable(os, workdir) {
         return argv.join(" ");
     }
     match os {
-        TargetOs::Windows => format!("cd /d \"{workdir}\" && {}", argv.join(" ")),
+        TargetOs::Windows => format!("cmd /c \"cd /d {workdir}&& {}\"", argv.join(" ")),
         _ => format!(
             "cd {} && {}",
             sh_quote(workdir),
@@ -94,7 +98,7 @@ mod tests {
         );
         assert_eq!(
             copy_command(TargetOs::Windows, r"C:\w", &argv()),
-            r#"cd /d "C:\w" && claude --resume 0a1b2c3d-1111-2222-3333-444455556666"#
+            r#"cmd /c "cd /d C:\w&& claude --resume 0a1b2c3d-1111-2222-3333-444455556666""#
         );
     }
 
@@ -112,13 +116,18 @@ mod tests {
             r"C:\w`",
             "C:\\w\u{201d}; calc; \u{201c}",
             "C:\\w\u{201e}; calc",
+            r"C:\w& calc",
+            r"C:\w|calc",
+            r"C:\w>x",
+            r"C:\w<x",
+            r"C:\w^",
         ] {
             assert_eq!(copy_command(TargetOs::Windows, breakout, &argv()), plain);
         }
-        // Inert inside double quotes: the folder stays.
-        let inert = r"C:\Мои проекты\a&b^c!d (x)'";
+        // Inert in both shells: the folder stays.
+        let inert = r"C:\Мои проекты\a;b,c=d!e (x)'";
         assert!(copy_command(TargetOs::Windows, inert, &argv())
-            .starts_with(&format!("cd /d \"{inert}\" && ")));
+            .starts_with(&format!("cmd /c \"cd /d {inert}&& ")));
         // Single quotes keep all of it literal elsewhere.
         assert!(
             copy_command(TargetOs::Linux, "/a%b$(c)`", &argv()).starts_with("cd '/a%b$(c)`' && ")

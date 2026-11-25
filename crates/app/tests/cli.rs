@@ -1,7 +1,7 @@
 //! The binary end to end (`assert_cmd`): sync, status and search with `--json`
 //! on a temporary index; errors and exit codes.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
 use serde_json::{json, Value};
@@ -184,5 +184,130 @@ fn serve_refuses_a_network_address_without_a_token() {
             .clone();
         let text = String::from_utf8(err).unwrap();
         assert!(text.contains("set --token"), "{text}");
+    }
+}
+
+/// An index with one conversation in `cwd`.
+fn indexed_in(cwd: &str) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("claude/-w");
+    std::fs::create_dir_all(&project).unwrap();
+    let line = json!({"type": "user", "entrypoint": "cli", "cwd": cwd,
+        "timestamp": "2026-11-10T08:55:37.856Z", "message": {"content": "nginx \u{1b}[31mred"}});
+    std::fs::write(project.join(format!("{ID}.jsonl")), format!("{line}\n")).unwrap();
+    tmp
+}
+
+#[test]
+fn escape_sequences_from_transcripts_are_not_printed() {
+    let tmp = indexed_in("/gone/\u{1b}[2Jx");
+    let text = stdout(bin(tmp.path()).args(["search", "nginx"]));
+    assert!(!text.contains('\u{1b}'), "{text:?}");
+    assert!(
+        text.contains("  /gone/\u{fffd}[2Jx  (folder missing)\n"),
+        "{text}"
+    );
+    // No folder to run it in: no hint either.
+    assert!(
+        text.contains(&format!("resume: claude --resume {ID}\n")),
+        "{text}"
+    );
+}
+
+/// A folder that exists but cannot be quoted: the hint says where to run.
+#[test]
+fn folder_hint_for_a_command_without_cd() {
+    let dir = tempfile::tempdir().unwrap();
+    // `%` is refused on Windows only; a newline is not a valid name there.
+    let cwd = dir.path().join(if cfg!(windows) { "100%" } else { "a\nb" });
+    std::fs::create_dir(&cwd).unwrap();
+    let tmp = indexed_in(&cwd.to_string_lossy());
+    let text = stdout(bin(tmp.path()).args(["search", "nginx"]));
+    assert!(
+        text.contains(&format!(
+            "resume: claude --resume {ID}  (run it in the folder above)\n"
+        )),
+        "{text}"
+    );
+}
+
+/// Writes a fake `claude` that leaves `ran.txt` with its arguments in the
+/// current folder, and returns the folder to put on `PATH`.
+fn fake_claude(dir: &Path) -> PathBuf {
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    if cfg!(windows) {
+        std::fs::write(bin.join("claude.cmd"), "@>ran.txt echo %*\r\n").unwrap();
+    } else {
+        let script = bin.join("claude");
+        std::fs::write(&script, "#!/bin/sh\necho \"$@\" > ran.txt\n").unwrap();
+        let chmod = std::process::Command::new("chmod")
+            .arg("+x")
+            .arg(&script)
+            .status();
+        assert!(chmod.unwrap().success());
+    }
+    bin
+}
+
+/// Runs a script file holding the pasted command in `shell`; `None` when the
+/// shell is not installed.
+fn run_in_shell(shell: &str, dir: &Path, command: &str) -> Option<std::process::Output> {
+    let (ext, args): (&str, &[&str]) = match shell {
+        "cmd" => ("bat", &["/d", "/c"]),
+        "powershell" | "pwsh" => (
+            "ps1",
+            &["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"],
+        ),
+        _ => ("sh", &[]),
+    };
+    let script = dir.join(format!("paste.{ext}"));
+    let text = if ext == "bat" {
+        format!("@{command}\r\n")
+    } else {
+        format!("{command}\n")
+    };
+    std::fs::write(&script, text).unwrap();
+    let mut path = vec![dir.join("bin")];
+    path.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::process::Command::new(shell)
+        .args(args)
+        .arg(&script)
+        .current_dir(dir)
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .output()
+        .ok()
+}
+
+/// The copied command, pasted into every shell of this OS, runs the agent in
+/// the conversation's folder.
+#[test]
+fn copied_command_works_in_real_shells() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().join("my dir (x)' a;b,c=d");
+    std::fs::create_dir(&cwd).unwrap();
+    fake_claude(dir.path());
+    let tmp = indexed_in(&cwd.to_string_lossy());
+    let found = json_out(bin(tmp.path()).args(["search", "--json", "nginx"]));
+    let command = found["results"][0]["resumeCommand"].as_str().unwrap();
+    assert!(command.contains("cd "), "{command}");
+
+    let (required, optional): (&[&str], &[&str]) = if cfg!(windows) {
+        (&["cmd", "powershell"], &["pwsh"])
+    } else {
+        (&["sh"], &["bash", "zsh"])
+    };
+    for shell in required.iter().chain(optional) {
+        let Some(out) = run_in_shell(shell, dir.path(), command) else {
+            assert!(!required.contains(shell), "{shell} is not available");
+            continue;
+        };
+        let ran = cwd.join("ran.txt");
+        let args = std::fs::read_to_string(&ran)
+            .unwrap_or_else(|e| panic!("{shell}: {e}; {command}; {out:?}"));
+        assert_eq!(args.trim(), format!("--resume {ID}"), "{shell}");
+        std::fs::remove_file(ran).unwrap();
     }
 }

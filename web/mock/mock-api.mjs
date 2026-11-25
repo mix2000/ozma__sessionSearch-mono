@@ -33,7 +33,7 @@ const sessions = [
     lastAt: ago(2900),
     workdirExists: true,
     resumeCommand:
-      'cd /d "C:\\Users\\demo\\projects\\sample-api" && codex resume 019a2b3c-2222-7def-8123-bbbbbbbbbbbb',
+      'cmd /c "cd /d C:\\Users\\demo\\projects\\sample-api&& codex resume 019a2b3c-2222-7def-8123-bbbbbbbbbbbb"',
   },
   {
     id: 'grok-3c4d5e6f-3333-4abc-9def-cccccccccccc',

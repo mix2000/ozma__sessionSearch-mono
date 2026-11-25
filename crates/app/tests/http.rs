@@ -140,6 +140,7 @@ async fn search_json_shape() {
             "messageCount",
             "provider",
             "resumeCommand",
+            "resumeNeedsFolder",
             "startedAt",
             "title",
             "workdir",
@@ -218,7 +219,7 @@ async fn resume_success_and_errors() {
     assert!(v["command"]
         .as_str()
         .unwrap()
-        .ends_with(&format!("claude --resume {ID}")));
+        .contains(&format!("claude --resume {ID}")));
     let missing = "/api/agents/transcripts/00000000-0000-0000-0000-000000000000/resume";
     assert_eq!(call(&app, "POST", missing, &[]).await.0, 404);
     let bad = "/api/agents/transcripts/bad%20id/resume";
@@ -242,7 +243,7 @@ async fn resume_conflict_carries_the_command() {
     assert!(v["command"]
         .as_str()
         .unwrap()
-        .ends_with(&format!("claude --resume {ID}")));
+        .contains(&format!("claude --resume {ID}")));
 }
 
 #[tokio::test]

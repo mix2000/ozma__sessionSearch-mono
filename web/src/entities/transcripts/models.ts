@@ -44,6 +44,8 @@ export interface ITranscriptResult {
   hits: ITranscriptHit[];
   /* Команда продолжения для своего терминала (собирает бэкенд). */
   resumeCommand?: string;
+  /* Папка есть, но в команду не вошла: выполнять в ней. */
+  resumeNeedsFolder?: boolean;
 }
 
 /* Ответ поиска. */

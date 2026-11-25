@@ -7,9 +7,15 @@ use session_search_core::{Engine, SearchParams, SearchResponse};
 
 use crate::cli::args::SearchArgs;
 
+/// Text from a transcript, safe for a terminal: control characters (escape
+/// sequences included) become `�`.
+fn printable(s: &str) -> String {
+    s.replace(char::is_control, "\u{fffd}")
+}
+
 /// Whitespace collapsed to single spaces, clipped to `max` chars with `…`.
 fn one_line(s: &str, max: usize) -> String {
-    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let flat = printable(&s.split_whitespace().collect::<Vec<_>>().join(" "));
     if flat.chars().count() > max {
         flat.chars().take(max).collect::<String>() + "…"
     } else {
@@ -70,7 +76,8 @@ fn print_results(res: &SearchResponse) {
         );
         if let Some(w) = &r.workdir {
             println!(
-                "  {w}{}",
+                "  {}{}",
+                printable(w),
                 if r.workdir_exists {
                     ""
                 } else {
@@ -91,7 +98,7 @@ fn print_results(res: &SearchResponse) {
             println!("  … {} more", r.matches - r.hits.len());
         }
         if let Some(cmd) = &r.resume_command {
-            let hint = if r.workdir.is_some() && !cmd.starts_with("cd ") {
+            let hint = if r.resume_needs_folder {
                 "  (run it in the folder above)"
             } else {
                 ""
@@ -113,6 +120,8 @@ mod tests {
     fn one_line_collapses_and_clips() {
         assert_eq!(one_line(" a\n\tb  c ", 10), "a b c");
         assert_eq!(one_line("абвгд", 3), "абв…");
+        assert_eq!(one_line("a\u{1b}[31m\tb", 10), "a\u{fffd}[31m b");
+        assert_eq!(printable("/a\n\u{9b}b c"), "/a\u{fffd}\u{fffd}b c");
     }
 
     #[test]

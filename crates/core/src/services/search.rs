@@ -54,6 +54,7 @@ pub fn to_result(
             .get(&t.id.to_lowercase())
             .map(|&pid| LiveState::External { pid }),
         resume_command: resume::command(&t, os),
+        resume_needs_folder: workdir_exists && resume::needs_folder(&t, os),
         id: t.id,
         provider: t.provider,
         title: t.title,
@@ -188,11 +189,22 @@ mod tests {
             r.resume_command.as_deref(),
             Some("cd '/my dir' && claude --resume ABC")
         );
+        assert!(!r.resume_needs_folder);
         assert_eq!(r.started_at.as_deref(), Some("1970-01-01T00:00:00.000Z"));
         let rows: Vec<_> = (0..5).map(|i| row(i, "ABC", "a nginx b")).collect();
         let r = with_hits(r, &rows, &["nginx".into()]);
         assert_eq!((r.matches, r.hits.len()), (5, HITS_PER_SESSION));
         assert_eq!(r.hits[0].snippet.matched, "a nginx b");
+    }
+
+    #[test]
+    fn folder_hint_only_while_the_folder_exists() {
+        let card = |exists| {
+            let s = session("ABC", "claude", Some(r"C:\100%"));
+            to_result(s, &LiveMap::new(), exists, TargetOs::Windows)
+        };
+        assert!(card(true).resume_needs_folder);
+        assert!(!card(false).resume_needs_folder);
     }
 
     struct Dirs(&'static [&'static str]);

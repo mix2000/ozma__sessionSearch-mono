@@ -229,7 +229,7 @@ fn build_session_cards() {
     assert!(main_r["resumeCommand"]
         .as_str()
         .unwrap()
-        .ends_with(&format!("grok --resume {BUILD_ID}")));
+        .contains(&format!("grok --resume {BUILD_ID}")));
     assert_eq!(main_r["matches"], 2);
     let hashed = &v["results"][1];
     assert_eq!(hashed["workdir"], b.workdir.to_string_lossy().as_ref());
@@ -456,7 +456,7 @@ fn cli_session_card() {
     assert!(res["resumeCommand"]
         .as_str()
         .unwrap()
-        .ends_with(&format!("grok -s {CLI_ID}")));
+        .contains(&format!("grok -s {CLI_ID}")));
     // Unchanged database: nothing to do.
     assert_eq!(e.sync().updated, 0);
 }
@@ -489,7 +489,7 @@ fn cli_new_messages_are_imported_incrementally() {
 fn cli_resume_uses_dash_s_and_never_writes_the_db() {
     let (c, e) = cli_synced();
     let ok = e.resume(CLI_ID).unwrap();
-    assert!(ok.command.ends_with(&format!("grok -s {CLI_ID}")));
+    assert!(ok.command.contains(&format!("grok -s {CLI_ID}")));
     let n: i64 = c
         .src
         .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))

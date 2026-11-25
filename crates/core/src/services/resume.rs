@@ -5,7 +5,7 @@ use crate::error::{Error, Result};
 use crate::models::messages;
 use crate::models::{Provider, TargetOs};
 use crate::services::agents::resume_argv;
-use crate::services::command::copy_command;
+use crate::services::command::{copy_command, quotable};
 use crate::storage::sessions::SessionRow;
 
 /// `cd <workdir> && <agent resume command>` for `os` (just the agent command
@@ -17,6 +17,11 @@ pub fn command(s: &SessionRow, os: TargetOs) -> Option<String> {
         Some(w) => copy_command(os, w, &argv),
         None => argv.join(" "),
     })
+}
+
+/// Whether [`command`] had to leave the known folder out: run it there.
+pub fn needs_folder(s: &SessionRow, os: TargetOs) -> bool {
+    s.workdir.as_deref().is_some_and(|w| !quotable(os, w))
 }
 
 /// What to run and where.
@@ -179,5 +184,17 @@ mod tests {
             Some("codex resume abc")
         );
         assert_eq!(command(&session("other", None), TargetOs::Linux), None);
+    }
+
+    #[test]
+    fn folder_hint_follows_the_command() {
+        let s = session("claude", Some(r"C:\100%"));
+        assert_eq!(
+            command(&s, TargetOs::Windows).as_deref(),
+            Some("claude --resume abc")
+        );
+        assert!(needs_folder(&s, TargetOs::Windows));
+        assert!(!needs_folder(&s, TargetOs::Mac));
+        assert!(!needs_folder(&session("claude", None), TargetOs::Windows));
     }
 }

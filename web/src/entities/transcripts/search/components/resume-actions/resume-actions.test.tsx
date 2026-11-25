@@ -60,21 +60,22 @@ describe('ResumeActions', () => {
     expect(screen.getByText('cd /w && grok -s x')).toBeInTheDocument();
   });
 
-  it('команда без cd — подсказка про папку', () => {
+  it('подсказка про папку — только по признаку бэкенда', () => {
     const hint = 'Выполните команду в папке разговора';
     const plain = { workdir: 'C:\\100%', resumeCommand: 'claude --resume aaaa-1111' };
-    const { unmount } = renderWithProviders(<ResumeActions result={makeResult(plain)} />);
+    const { unmount } = renderWithProviders(
+      <ResumeActions result={makeResult({ ...plain, resumeNeedsFolder: true })} />
+    );
     expect(screen.getByText(hint)).toBeInTheDocument();
     unmount();
-    for (const other of [
-      { resumeCommand: COMMAND },
-      { ...plain, workdir: null },
-      { workdir: 'C:\\100%' },
-    ]) {
-      const view = renderWithProviders(<ResumeActions result={makeResult(other)} />);
-      expect(screen.queryByText(hint)).toBeNull();
-      view.unmount();
-    }
+    // Папки нет: бэкенд признак не ставит — противоречивой подсказки рядом нет.
+    renderWithProviders(
+      <ResumeActions
+        result={makeResult({ ...plain, workdirExists: false, resumeNeedsFolder: false })}
+      />
+    );
+    expect(screen.getByText('Папки разговора уже нет — продолжить нельзя')).toBeInTheDocument();
+    expect(screen.queryByText(hint)).toBeNull();
   });
 
   it('без команды от бэкенда — блока команды нет', () => {
