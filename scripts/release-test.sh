@@ -20,9 +20,11 @@ git_t commit -qm init
 cat >"$TMP/bin/gh" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
-  "release view")
+  "release list")
+    # Предупреждение в stderr при удачном ответе не должно мешать.
+    echo "warning: a new release of gh is available" >&2
     case "$FAKE_DRAFT" in
-      "") echo "release not found" >&2; exit 1 ;;
+      "") ;;
       error) echo "HTTP 401: Bad credentials" >&2; exit 1 ;;
       *) echo "$FAKE_DRAFT" ;;
     esac ;;

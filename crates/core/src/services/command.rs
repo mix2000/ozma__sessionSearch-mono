@@ -37,9 +37,14 @@ pub fn has_control(s: &str) -> bool {
 }
 
 /// A character that must not reach a terminal from a transcript: a control
-/// character, or a bidirectional one that makes text read as something else.
+/// character, or a bidirectional one that makes text read as something else
+/// (embeddings, overrides, isolates and the marks LRM, RLM, ALM).
 pub fn unprintable(c: char) -> bool {
-    c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    c.is_control()
+        || matches!(
+            c,
+            '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}' | '\u{061c}'
+        )
 }
 
 /// Whether a pasted command can change to `workdir`: no [`unprintable`]
@@ -187,7 +192,9 @@ mod tests {
         assert!(safe_token("--resume"));
         assert!(!safe_token("a b") && !safe_token(""));
         assert!(has_control("a\nb") && !has_control("a b"));
-        assert!("\u{1b}\u{9b}\u{202e}\u{2066}".chars().all(unprintable));
+        assert!("\u{1b}\u{9b}\u{202e}\u{2066}\u{200e}\u{200f}\u{61c}"
+            .chars()
+            .all(unprintable));
         assert!(!"яé 👩\u{200d}💻\u{fffd}".contains(unprintable));
         assert_eq!(applescript_str(r#"a"b\c"#), r#""a\"b\\c""#);
     }

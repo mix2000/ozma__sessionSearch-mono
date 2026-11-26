@@ -121,7 +121,10 @@ mod tests {
         assert_eq!(one_line(" a\n\tb  c ", 10), "a b c");
         assert_eq!(one_line("абвгд", 3), "абв…");
         assert_eq!(one_line("a\u{1b}[31m\tb", 10), "a\u{fffd}[31m b");
-        assert_eq!(printable("a\u{202e}b\u{2066}"), "a\u{fffd}b\u{fffd}");
+        assert_eq!(
+            printable("a\u{202e}b\u{2066}\u{200f}"),
+            "a\u{fffd}b\u{fffd}\u{fffd}"
+        );
         assert_eq!(printable("/a\n\u{9b}b c"), "/a\u{fffd}\u{fffd}b c");
     }
 
